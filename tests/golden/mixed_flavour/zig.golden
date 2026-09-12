@@ -1,0 +1,64 @@
+
+// GE File I/O runtime (Zig)
+fn ge_read_file(path: []const u8) []const u8 {
+    const file = std.fs.cwd().openFile(path, .{}) catch return "";
+    defer file.close();
+    const stat = file.stat() catch return "";
+    const buf = std.heap.page_allocator.alloc(u8, stat.size) catch return "";
+    _ = file.read(buf) catch return "";
+    return buf;
+}
+
+fn ge_write_file(path: []const u8, content: []const u8) bool {
+    const file = std.fs.cwd.createFile(path, .{}) catch return false;
+    defer file.close();
+    _ = file.write(content) catch return false;
+    return true;
+}
+
+fn ge_append_file(path: []const u8, content: []const u8) bool {
+    const file = std.fs.cwd.openFile(path, .{ .mode = .write_only }) catch {
+        const f2 = std.fs.cwd.createFile(path, .{}) catch return false;
+        defer f2.close();
+        _ = f2.write(content) catch return false;
+        return true;
+    };
+    defer file.close();
+    file.seekFromEnd(0) catch return false;
+    _ = file.write(content) catch return false;
+    return true;
+}
+
+
+// GE Math runtime (Zig)
+fn ge_sqrt(x: f64) f64 { return @sqrt(x); }
+fn ge_floor(x: f64) f64 { return @floor(x); }
+fn ge_ceil(x: f64) f64 { return @ceil(x); }
+fn ge_round(x: f64) f64 { return @round(x); }
+fn ge_sin(x: f64) f64 { return std.math.sin(x); }
+fn ge_cos(x: f64) f64 { return std.math.cos(x); }
+fn ge_tan(x: f64) f64 { return std.math.tan(x); }
+fn ge_log(x: f64) f64 { return @log(x); }
+fn ge_exp(x: f64) f64 { return @exp(x); }
+
+const std = @import("std");
+
+fn factorial(n: i64) i64 {
+    if (((n <= 1))) {
+        return 1;
+    }
+    var result: i64 = 1;
+    var i: i64 = 2;
+    while (((i <= n))) {
+        result = (result * i);
+        i = (i + 1);
+    }
+    return result;
+}
+fn triple(x: i64) i64 {
+    return (x * 3);
+}
+pub fn main() void {
+    std.io.getStdOut().writer().print("{d}\n", .{factorial(5)}) catch unreachable;
+    std.io.getStdOut().writer().print("{d}\n", .{triple(7)}) catch unreachable;
+}

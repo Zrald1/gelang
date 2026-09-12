@@ -1,0 +1,88 @@
+analyze <command>
+analyze arg file
+analyze option --entry
+analyze option --help, -h
+api-check <command>
+api-check option --help, -h
+api-check option --update
+bench <command>
+bench option --help, -h
+bench option --out-dir, -o
+build <command>
+build arg file
+build option --app-name
+build option --backend
+build option --entry
+build option --help, -h
+build option --no-research
+build option --out-dir, -o
+build option --run
+build option --target
+compilers <command>
+compilers option --help, -h
+create <command>
+create arg name?
+create option --backends
+create option --help, -h
+create option --out-dir, -o
+create option --platforms
+create option --template
+create option --yes, -y
+deploy <command>
+deploy arg package
+deploy option --help, -h
+deploy option --host
+deploy option --out-dir, -o
+deploy option --port
+deploy option --target
+diff <command>
+diff arg path
+diff option --backends
+diff option --help, -h
+diff option --timeout
+diff option --verbose, -v
+doctor <command>
+doctor option --help, -h
+doctor option --json
+flutter <command>
+flutter arg file
+flutter option --app-name
+flutter option --backend
+flutter option --help, -h
+flutter option --lib-name
+flutter option --no-research
+flutter option --out-dir, -o
+golden <command>
+golden option --backends
+golden option --check
+golden option --help, -h
+golden option --no-behaviour
+golden option --update
+golden option --verbose, -v
+install <command>
+install arg package
+install option --help, -h
+install option --no-download
+install option --out-dir, -o
+install option --run
+install option --target
+pack <command>
+pack arg file
+pack option --app-name
+pack option --backend
+pack option --help, -h
+pack option --lib-name
+pack option --no-research
+pack option --out-dir, -o
+pack option --version
+react <command>
+react arg file
+react option --app-name
+react option --force
+react option --help, -h
+react option --out-dir, -o
+tools <command>
+tools arg tool_name?
+tools arg tools_action?
+tools option --force
+tools option --help, -h

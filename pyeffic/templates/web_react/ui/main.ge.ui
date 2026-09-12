@@ -1,0 +1,33 @@
+"""UI definition for {app_name}.
+
+This file is the single source of truth for the frontend layout.
+Regenerate the React app with:
+
+    ge react ui/main.ge.ui --app-name {app_name}
+
+Existing files under web/frontend/src are kept unless you pass --force, so
+hand edits are never clobbered.
+"""
+Window {
+  title: "{app_name}"
+  Column {
+    padding: 24
+    children:
+      Text "{app_name}" style="headline"
+      Text "GE · React · Rust" style="subtitle"
+      SizedBox height=16
+      Text "Operation" style="title"
+      TextField state="op" hint="0=add 1=mul 2=fact 3=fib 4=prime"
+      TextField state="arg_a" hint="first argument"
+      TextField state="arg_b" hint="second argument"
+      SizedBox height=12
+      Row {
+        children:
+          ElevatedButton "Call backend" on_click=Action(call="safe_dispatch")
+          SizedBox width=12
+          ElevatedButton "Health" on_click=Action(call="api_ok")
+      }
+      Divider
+      Text state="result" style="value"
+  }
+}

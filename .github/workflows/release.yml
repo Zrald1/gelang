@@ -1,0 +1,253 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump (ignored if you push a tag)"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Work out which version to publish.
+  #
+  #   tag push    -> the tag IS the version        (v0.2.0 -> 0.2.0)
+  #                  if that version is already published, bump the patch
+  #   dispatch    -> bump the latest tag           (v0.2.0 -> 0.2.1)
+  # ---------------------------------------------------------------------
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      create_tag: ${{ steps.resolve.outputs.create_tag }}
+      bumped: ${{ steps.resolve.outputs.bumped }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Resolve
+        id: resolve
+        run: |
+          set -euo pipefail
+
+          # is a version already on the registry?
+          taken() { npm view "gelang@$1" version >/dev/null 2>&1; }
+
+          # bump the patch component of a semver string
+          next_patch() {
+            IFS='.' read -r MAJ MIN PAT <<< "$1"
+            echo "$MAJ.$MIN.$((PAT + 1))"
+          }
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            # bump the highest existing v* tag
+            LATEST=$(git tag -l 'v*' | sort -V | tail -1)
+            if [[ -z "$LATEST" ]]; then
+              NEXT="0.0.1"
+            else
+              BASE="${LATEST#v}"
+              IFS='.' read -r MAJ MIN PAT <<< "$BASE"
+              case "${{ inputs.bump }}" in
+                major) MAJ=$((MAJ + 1)); MIN=0; PAT=0 ;;
+                minor) MIN=$((MIN + 1)); PAT=0 ;;
+                *)     PAT=$((PAT + 1)) ;;
+              esac
+              NEXT="$MAJ.$MIN.$PAT"
+            fi
+            CREATE_TAG=true
+          else
+            NEXT="${GITHUB_REF_NAME#v}"
+            CREATE_TAG=false
+          fi
+
+          if ! [[ "$NEXT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$NEXT' is not a valid semver version"
+            exit 1
+          fi
+
+          # A version can never be published twice. If the resolved version is
+          # already on the registry — a re-pushed tag, or a tag whose commit
+          # predates a previous release — bump until we find a free one and
+          # let the workflow create the matching tag.
+          REQUESTED="$NEXT"
+          BUMPED=false
+          while taken "$NEXT"; do
+            NEXT="$(next_patch "$NEXT")"
+            BUMPED=true
+          done
+
+          if [[ "$BUMPED" == "true" ]]; then
+            echo "::warning::gelang@$REQUESTED is already published — releasing $NEXT instead"
+            CREATE_TAG=true
+          fi
+
+          echo "version=$NEXT"    >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEXT"       >> "$GITHUB_OUTPUT"
+          echo "create_tag=$CREATE_TAG" >> "$GITHUB_OUTPUT"
+          echo "bumped=$BUMPED"   >> "$GITHUB_OUTPUT"
+          echo "releasing $NEXT (create tag: $CREATE_TAG, bumped: $BUMPED)"
+
+  # ---------------------------------------------------------------------
+  # Publish to npmjs.org and GitHub Packages.
+  # ---------------------------------------------------------------------
+  publish:
+    name: Publish ${{ needs.version.outputs.version }}
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install GE
+        run: pip install -e .
+
+      - name: Set the version from the resolved tag
+        run: |
+          V="${{ needs.version.outputs.version }}"
+          node -e "
+            const fs = require('fs');
+            const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            p.version = process.env.V;
+            fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n');
+          "
+          python - <<'PY'
+          import os, re, pathlib
+          v = os.environ["V"]
+          p = pathlib.Path("pyproject.toml")
+          p.write_text(re.sub(r'^version\s*=\s*"[^"]+"', f'version = "{v}"',
+                              p.read_text(), count=1, flags=re.M))
+          PY
+          echo "package.json: $(node -p "require('./package.json').version")"
+          echo "pyproject.toml: $(grep -m1 '^version' pyproject.toml)"
+        env:
+          V: ${{ needs.version.outputs.version }}
+
+      - name: Surface guards
+        run: |
+          python -m pyeffic.ge_cli api-check
+          python -m pyeffic.ge_cli golden --check --no-behaviour
+
+      - name: Assemble the npm payload
+        run: node scripts/build-npm.js
+
+      - name: Pack
+        run: npm pack
+
+      - name: Is this version already on npm?
+        id: npmcheck
+        run: |
+          V="${{ needs.version.outputs.version }}"
+          if npm view "gelang@$V" version >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::gelang@$V is already on npm — skipping the npm publish step"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "gelang@$V is free"
+          fi
+
+      # -- npmjs.org -----------------------------------------------------
+      - name: Publish to npmjs.org
+        if: steps.npmcheck.outputs.published == 'false'
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.mynpm }}
+
+      - name: Verify on npmjs.org
+        run: |
+          V="${{ needs.version.outputs.version }}"
+          # the registry CDN can lag a few seconds behind a publish
+          for i in 1 2 3 4 5 6; do
+            if npm view "gelang@$V" version >/dev/null 2>&1; then
+              echo "gelang@$V is live"
+              exit 0
+            fi
+            echo "not visible yet (attempt $i/6), waiting..."
+            sleep 10
+          done
+          echo "::error::gelang@$V published but is not visible after 60s"
+          exit 1
+
+      # -- GitHub Packages -----------------------------------------------
+      # GitHub Packages requires the package name to be scoped to the owner,
+      # so this publishes the same tarball under @zrald1/gelang. This is what
+      # makes it appear under the repository's "Packages" sidebar.
+      #
+      # setup-node only writes auth for the registry it was given, so the
+      # GitHub registry needs its own entry or the publish fails ENEEDAUTH.
+      - name: Publish to GitHub Packages
+        run: |
+          npm pkg set name="@zrald1/gelang"
+          npm config set "@zrald1:registry" "https://npm.pkg.github.com"
+          npm config set "//npm.pkg.github.com/:_authToken" "$NODE_AUTH_TOKEN"
+          npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore the npm name for the release artifact
+        run: npm pkg set name="gelang"
+
+      # -- git tag (dispatch only) ---------------------------------------
+      - name: Create and push the tag
+        if: needs.version.outputs.create_tag == 'true'
+        run: |
+          TAG="${{ needs.version.outputs.tag }}"
+          if git ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
+            echo "$TAG already exists on the remote"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      # -- GitHub release ------------------------------------------------
+      - name: Create the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: ${{ needs.version.outputs.tag }}
+          body: |
+            ## Install
+
+            ```bash
+            npx gelang@${{ needs.version.outputs.version }} doctor
+            npm install -g gelang
+            ```
+
+            Full history: [CHANGELOG.md](../blob/main/CHANGELOG.md)
+
+            ---
+
+            ${{ github.event.head_commit.message }}
+          files: gelang-*.tgz
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

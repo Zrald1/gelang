@@ -1,0 +1,55 @@
+
+// GE File I/O runtime (Rust)
+use std::io::{Read, Write};
+
+fn ge_read_file(path: &str) -> String {
+    std::fs::read_to_string(path).unwrap_or_default()
+}
+
+fn ge_write_file(path: &str, content: &str) -> bool {
+    std::fs::write(path, content).is_ok()
+}
+
+fn ge_append_file(path: &str, content: &str) -> bool {
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(path);
+    match f {
+        Ok(mut f) => f.write_all(content.as_bytes()).is_ok(),
+        Err(_) => false,
+    }
+}
+
+
+// GE Math runtime (Rust)
+fn ge_sqrt(x: f64) -> f64 { x.sqrt() }
+fn ge_floor(x: f64) -> f64 { x.floor() }
+fn ge_ceil(x: f64) -> f64 { x.ceil() }
+fn ge_round(x: f64) -> f64 { x.round() }
+fn ge_sin(x: f64) -> f64 { x.sin() }
+fn ge_cos(x: f64) -> f64 { x.cos() }
+fn ge_tan(x: f64) -> f64 { x.tan() }
+fn ge_log(x: f64) -> f64 { x.ln() }
+fn ge_exp(x: f64) -> f64 { x.exp() }
+
+fn factorial(n: i64) -> i64 {
+    if ((n <= 1)) {
+        return 1;
+    }
+    let mut result: i64 = 1;
+    let mut i: i64 = 2;
+    while ((i <= n)) {
+        result = (result * i);
+        i = (i + 1);
+    }
+    return result;
+}
+fn triple(x: i64) -> i64 {
+    return (x * 3);
+}
+fn main() {
+    println!("{}", factorial(5));
+    println!("{}", triple(7));
+}

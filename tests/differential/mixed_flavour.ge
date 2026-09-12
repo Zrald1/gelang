@@ -1,0 +1,26 @@
+# @expect: 120
+# @expect: 21
+<factorial:typescript>
+export function factorial(n: number): number {
+    if (n <= 1) {
+        return 1;
+    }
+    let result: number = 1;
+    let i: number = 2;
+    while (i <= n) {
+        result = result * i;
+        i = i + 1;
+    }
+    return result;
+}
+</factorial>
+
+<triple>
+def triple(x: int) -> int:
+    return x * 3
+</triple>
+
+
+def main() -> None:
+    print(@factorial(5))
+    print(@triple(7))

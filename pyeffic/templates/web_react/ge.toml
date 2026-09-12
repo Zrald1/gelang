@@ -1,0 +1,23 @@
+# GE project configuration for {app_name}
+[project]
+name = "{app_name}"
+version = "0.1.0"
+description = "Full-stack web app — React frontend + Rust backend"
+template = "web-react"
+
+[build]
+platforms = ["web"]
+languages = ["rust"]
+
+[layers]
+memory = "app/memory"     # Rust
+core = "app/core"         # Rust
+ui = "ui"                 # .ge.ui -> React
+entry = "web/server.ge.py"
+
+[frontend]
+generator = "react"
+framework = "react"
+language = "typescript"
+bundler = "vite"
+output = "web/frontend"

@@ -1,0 +1,60 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+class Program {
+
+    // GE File I/O runtime (C#)
+    static string GeReadFile(string path) {
+        return System.IO.File.ReadAllText(path);
+    }
+
+    static bool GeWriteFile(string path, string content) {
+        try { System.IO.File.WriteAllText(path, content); return true; }
+        catch { return false; }
+    }
+
+    static bool GeAppendFile(string path, string content) {
+        try { System.IO.File.AppendAllText(path, content); return true; }
+        catch { return false; }
+    }
+
+
+    // GE Math runtime (C#)
+    static double GeSqrt(double x) { return System.Math.Sqrt(x); }
+    static double GeFloor(double x) { return System.Math.Floor(x); }
+    static double GeCeil(double x) { return System.Math.Ceiling(x); }
+    static double GeRound(double x) { return System.Math.Round(x); }
+    static double GeSin(double x) { return System.Math.Sin(x); }
+    static double GeCos(double x) { return System.Math.Cos(x); }
+    static double GeTan(double x) { return System.Math.Tan(x); }
+    static double GeLog(double x) { return System.Math.Log(x); }
+    static double GeExp(double x) { return System.Math.Exp(x); }
+    static long classify(long x)
+    {
+        if (((x > 0))) {
+            return 1;
+        }
+        if (((x < 0))) {
+            return (-1);
+        }
+        return 0;
+    }
+    static long sum_to(long n)
+    {
+        long total = 0;
+        long i = 1;
+        while (((i <= n))) {
+            total = (total + i);
+            i = (i + 1);
+        }
+        return total;
+    }
+    static void Main()
+    {
+        Console.WriteLine(classify(7));
+        Console.WriteLine(classify((-7)));
+        Console.WriteLine(classify(0));
+        Console.WriteLine(sum_to(10));
+    }
+}

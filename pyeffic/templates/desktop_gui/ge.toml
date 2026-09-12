@@ -1,0 +1,16 @@
+# GE project configuration for {app_name}
+[project]
+name = "{app_name}"
+version = "0.1.0"
+description = "Native desktop app — Rust shell + C++ core + C++ UI"
+template = "desktop-gui"
+
+[build]
+platforms = ["desktop"]
+languages = ["rust", "cpp"]
+
+[layers]
+memory = "app/memory"   # Rust
+core = "app/core"       # C++
+ui = "app/ui"           # C++
+entry = "desktop/main.ge.py"

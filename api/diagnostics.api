@@ -1,0 +1,12 @@
+GE001 unsupported construct / import warning
+GE002 type mismatch or lossy conversion
+GE003 reserved for future use
+GE004 reserved for future use
+GE005 native compilation failed
+GE006 reserved for future use
+GE007 function called but not defined
+GE008 entry point not found
+GE009 reserved for future use
+GE010 source frontend error (TypeScript/hybrid lowering)
+GE011 identifier renamed to avoid a target-language keyword
+GE020 deprecated form (planned)

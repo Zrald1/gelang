@@ -1,0 +1,82 @@
+#include <cstdint>
+#include <iostream>
+#include <vector>
+#include <map>
+#include <tuple>
+#include <cmath>
+#include <numeric>
+#include <algorithm>
+#include <string>
+
+using std::cout;
+using std::endl;
+
+
+// forward declarations
+int64_t classify(int64_t x);
+int64_t sum_to(int64_t n);
+int main();
+
+
+// GE File I/O runtime (C++)
+#include <fstream>
+#include <sstream>
+
+std::string ge_read_file(const std::string& path) {
+    std::ifstream f(path);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+}
+
+bool ge_write_file(const std::string& path, const std::string& content) {
+    std::ofstream f(path);
+    if (!f) return false;
+    f << content;
+    return true;
+}
+
+bool ge_append_file(const std::string& path, const std::string& content) {
+    std::ofstream f(path, std::ios::app);
+    if (!f) return false;
+    f << content;
+    return true;
+}
+
+
+// GE Math runtime (C++)
+double ge_sqrt(double x) { return std::sqrt(x); }
+double ge_floor(double x) { return std::floor(x); }
+double ge_ceil(double x) { return std::ceil(x); }
+double ge_round(double x) { return std::round(x); }
+double ge_sin(double x) { return std::sin(x); }
+double ge_cos(double x) { return std::cos(x); }
+double ge_tan(double x) { return std::tan(x); }
+double ge_log(double x) { return std::log(x); }
+double ge_exp(double x) { return std::exp(x); }
+
+int64_t classify(int64_t x) {
+    if (((x > 0))) {
+        return 1;
+    }
+    if (((x < 0))) {
+        return (-1);
+    }
+    return 0;
+}
+int64_t sum_to(int64_t n) {
+    int64_t total = 0;
+    int64_t i = 1;
+    while (((i <= n))) {
+        total = (total + i);
+        i = (i + 1);
+    }
+    return total;
+}
+int main() {
+    std::cout << (classify(7)) << std::endl;
+    std::cout << (classify((-7))) << std::endl;
+    std::cout << (classify(0)) << std::endl;
+    std::cout << (sum_to(10)) << std::endl;
+    return 0;
+}

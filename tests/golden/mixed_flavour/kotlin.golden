@@ -1,0 +1,38 @@
+import kotlin.math.*
+
+
+// GE File I/O runtime (Kotlin) — file I/O requires JDK
+// geReadFile/geWriteFile/geAppendFile omitted (JDK not in default classpath)
+
+
+// GE Math runtime (Kotlin)
+import kotlin.math.*
+fun ge_sqrt(x: Double): Double = sqrt(x)
+fun ge_floor(x: Double): Double = floor(x)
+fun ge_ceil(x: Double): Double = ceil(x)
+fun ge_round(x: Double): Double = round(x)
+fun ge_sin(x: Double): Double = sin(x)
+fun ge_cos(x: Double): Double = cos(x)
+fun ge_tan(x: Double): Double = tan(x)
+fun ge_log(x: Double): Double = ln(x)
+fun ge_exp(x: Double): Double = exp(x)
+
+fun factorial(n: Long): Long {
+    if (((n <= 1L))) {
+        return 1L;
+    }
+    var result: Long = 1L;
+    var i: Long = 2L;
+    while (((i <= n))) {
+        result = (result * i);
+        i = (i + 1L);
+    }
+    return result;
+}
+fun triple(x: Long): Long {
+    return (x * 3L);
+}
+fun main() {
+    println(factorial(5L));
+    println(triple(7L));
+}

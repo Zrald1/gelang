@@ -1,0 +1,62 @@
+{
+  "name": "gelang",
+  "version": "0.1.0",
+  "description": "One typed source language, compiled to Rust, C++, C#, Zig, Go, or Kotlin — chosen per function. Generates Flutter and React UIs from one DSL.",
+  "keywords": [
+    "ge",
+    "gelang",
+    "transpiler",
+    "compiler",
+    "polyglot",
+    "rust",
+    "cpp",
+    "csharp",
+    "zig",
+    "golang",
+    "kotlin",
+    "flutter",
+    "react",
+    "typescript",
+    "python"
+  ],
+  "homepage": "https://github.com/Zrald1/gelang",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Zrald1/gelang.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Zrald1/gelang/issues"
+  },
+  "license": "MIT",
+  "author": "Zrald",
+  "bin": {
+    "ge": "bin/ge.js",
+    "gelang": "bin/ge.js"
+  },
+  "files": [
+    "bin/",
+    "python/",
+    "scripts/check-toolchains.py",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "prepublishOnly": "node scripts/build-npm.js",
+    "build": "node scripts/build-npm.js",
+    "doctor": "node bin/ge.js doctor",
+    "test": "node scripts/test.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}

@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gelang"
+version = "0.1.0"
+description = "One typed source language, compiled to Rust, C++, C#, Zig, Go, or Kotlin — chosen per function. Generates Flutter and React UIs from one DSL."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Zrald" }]
+license = { text = "MIT" }
+keywords = [
+    "compiler", "transpiler", "polyglot", "rust", "cpp", "csharp",
+    "zig", "golang", "kotlin", "flutter", "react", "typescript",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Software Development :: Compilers",
+]
+
+[project.urls]
+Homepage = "https://github.com/Zrald1/gelang"
+Repository = "https://github.com/Zrald1/gelang"
+Issues = "https://github.com/Zrald1/gelang/issues"
+Changelog = "https://github.com/Zrald1/gelang/blob/main/CHANGELOG.md"
+
+[project.scripts]
+ge = "pyeffic.ge_cli:main"
+pyeffic = "pyeffic.cli:main"
+
+[tool.setuptools]
+# every subpackage must be listed, or the wheel ships a broken compiler
+packages = [
+    "pyeffic",
+    "pyeffic.emitters",
+    "pyeffic.frontends",
+]
+
+[tool.setuptools.package-data]
+# project templates are data, not code — `ge create` breaks without them
+pyeffic = ["templates/**/*", "templates/*/*", "templates/*/*/*"]

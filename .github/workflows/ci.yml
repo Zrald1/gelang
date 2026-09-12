@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Fast lane: no toolchains needed. Runs on every push.
+  # ---------------------------------------------------------------------
+  lint:
+    name: surface guards (no toolchains)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -e .
+
+      - name: Compiler imports
+        run: python -c "import pyeffic.ge_cli, pyeffic.pipeline, pyeffic.frontends.hybrid"
+
+      - name: CLI surface has not changed
+        run: python -m pyeffic.ge_cli api-check
+
+      - name: Golden lowering corpus
+        run: python -m pyeffic.ge_cli golden --check --no-behaviour
+
+      - name: Unit tests that need no toolchain
+        run: |
+          python -m unittest \
+            tests.test_analyzer \
+            tests.test_autoselect \
+            tests.test_config \
+            tests.test_emitters \
+            tests.test_hybrid_frontend \
+            tests.test_keyword_escaping \
+            tests.test_list_concat \
+            tests.test_named_blocks \
+            tests.test_reactgen \
+            tests.test_stability \
+            tests.test_typescript \
+            tests.test_typescript_frontend \
+            tests.test_ui
+
+  # ---------------------------------------------------------------------
+  # Per-backend lane: installs one toolchain, proves it works end to end.
+  # ---------------------------------------------------------------------
+  backend:
+    name: ${{ matrix.backend }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: rust
+            setup: rustup toolchain install stable --profile minimal
+          - backend: cpp
+            setup: sudo apt-get update && sudo apt-get install -y clang
+          - backend: go
+            setup: |
+              wget -q https://go.dev/dl/go1.22.5.linux-amd64.tar.gz
+              sudo tar -C /usr/local -xzf go1.22.5.linux-amd64.tar.gz
+              echo "/usr/local/go/bin" >> $GITHUB_PATH
+          - backend: zig
+            setup: |
+              wget -q https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz
+              tar -xf zig-linux-x86_64-0.13.0.tar.xz
+              echo "$PWD/zig-linux-x86_64-0.13.0" >> $GITHUB_PATH
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install toolchain
+        run: ${{ matrix.setup }}
+
+      - name: Install GE
+        run: pip install -e .
+
+      - name: Doctor
+        run: python -m pyeffic.ge_cli doctor
+
+      - name: This backend is present
+        run: python scripts/check-toolchains.py --require ${{ matrix.backend }}
+
+      - name: Differential — backends must agree with CPython
+        run: python -m pyeffic.ge_cli diff tests/differential --backends ${{ matrix.backend }}
+
+      - name: Golden corpus — emitted code must not drift
+        run: python -m pyeffic.ge_cli golden --check --backends ${{ matrix.backend }}
+
+  # ---------------------------------------------------------------------
+  # npm package: must pack, install and run.
+  # ---------------------------------------------------------------------
+  npm:
+    name: npm package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Assemble the payload
+        run: node scripts/build-npm.js
+
+      - name: Pack
+        run: npm pack
+
+      - name: Install the tarball into a clean project
+        run: |
+          mkdir -p /tmp/consumer && cd /tmp/consumer
+          npm init -y >/dev/null
+          npm install "$GITHUB_WORKSPACE"/gelang-*.tgz
+
+      - name: Doctor through npx
+        run: cd /tmp/consumer && npx gelang doctor --json
+
+      - name: Build a program through npx
+        run: |
+          rustup toolchain install stable --profile minimal
+          cd /tmp/consumer
+          printf 'def main() -> None:\n    print(6 * 7)\n' > hello.ge
+          npx gelang build hello.ge --backend rust
+          ./build/desktop/bin/rust_main | grep -q 42

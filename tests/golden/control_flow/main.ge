@@ -1,0 +1,25 @@
+"""Golden case: branching, loops, and early return."""
+
+
+def classify(x: int) -> int:
+    if x > 0:
+        return 1
+    if x < 0:
+        return -1
+    return 0
+
+
+def sum_to(n: int) -> int:
+    total: int = 0
+    i: int = 1
+    while i <= n:
+        total = total + i
+        i = i + 1
+    return total
+
+
+def main() -> None:
+    print(classify(7))
+    print(classify(-7))
+    print(classify(0))
+    print(sum_to(10))

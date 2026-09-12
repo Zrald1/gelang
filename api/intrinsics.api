@@ -1,0 +1,18 @@
+intrinsic geInline: TypeScript-flavour spelling of ge_inline
+intrinsic gePreamble: TypeScript-flavour spelling of ge_preamble
+intrinsic geRaw: TypeScript-flavour spelling of ge_raw
+intrinsic ge_inline: target-specific inline code, function body
+intrinsic ge_preamble: file-scope code injection, module level
+intrinsic ge_raw: unconditional raw code, function body
+decorator @cpp
+decorator @csharp
+decorator @dart
+decorator @go
+decorator @kotlin
+decorator @rust
+decorator @zig
+extension .ge -> hybrid
+extension .ge.py -> python
+extension .ge.ts -> typescript
+extension .ge.ui -> ui DSL
+extension .ts.ge.py -> typescript (legacy alias)

@@ -1,0 +1,77 @@
+package main
+
+import "fmt"
+import "strings"
+import "sort"
+import "os"
+import "math"
+
+func dictContains(m map[string]int64, k string) bool {
+    _, ok := m[k]
+    return ok
+}
+func strContains(s, sub string) bool {
+    return strings.Contains(s, sub)
+}
+var _ = strContains
+var _ = sort.Slice
+var _ = os.ReadFile
+var _ = math.Sqrt
+
+
+
+// GE File I/O runtime (Go)
+func geReadFile(path string) string {
+    data, err := os.ReadFile(path)
+    if err != nil { return "" }
+    return string(data)
+}
+
+func geWriteFile(path string, content string) bool {
+    return os.WriteFile(path, []byte(content), 0644) == nil
+}
+
+func geAppendFile(path string, content string) bool {
+    f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+    if err != nil { return false }
+    defer f.Close()
+    _, err = f.WriteString(content)
+    return err == nil
+}
+
+
+// GE Math runtime (Go)
+func geSqrt(x float64) float64 { return math.Sqrt(x) }
+func geFloor(x float64) float64 { return math.Floor(x) }
+func geCeil(x float64) float64 { return math.Ceil(x) }
+func geRound(x float64) float64 { return math.Round(x) }
+func geSin(x float64) float64 { return math.Sin(x) }
+func geCos(x float64) float64 { return math.Cos(x) }
+func geTan(x float64) float64 { return math.Tan(x) }
+func geLog(x float64) float64 { return math.Log(x) }
+func geExp(x float64) float64 { return math.Exp(x) }
+
+func classify(x int64) int64 {
+	if ((x > 0)) {
+		return 1;
+	}
+	if ((x < 0)) {
+		return (-1);
+	}
+	return 0;
+}
+func sum_to(n int64) int64 {
+	var total int64 = 0
+	var i int64 = 1
+	for ((i <= n)) {
+		total = (total + i);
+		i = (i + 1);
+	}
+	return total;
+}
+func main() {
+	fmt.Println(classify(7));
+	fmt.Println(classify((-7)));
+	fmt.Println(classify(0));
+	fmt.Println(sum_to(10));
+}
