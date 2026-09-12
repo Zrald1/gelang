@@ -63,6 +63,9 @@ class Spec:
     # str.split(sep) / sep.join(list). Empty means unsupported.
     str_split: str = ""
     str_join: str = ""
+    # in-place list.sort() / list.reverse()
+    list_sort: str = ""
+    list_reverse: str = ""
     list_slice: str = ""
     list_copy: str = ""
     # Iterating a dict in Python yields its keys. `dict_keys` is an
@@ -1784,6 +1787,18 @@ class Emitter:
                     if self.spec.name == "kotlin":
                         return f"{base}.trim()"
                     return f"{base}.strip()"
+            # in-place list operations: xs.sort() / xs.reverse()
+            if (isinstance(node.func, ast.Attribute)
+                    and node.func.attr in ("sort", "reverse")
+                    and not node.args):
+                list_base = self.expr(node.func.value)
+                tpl = (self.spec.list_sort if node.func.attr == "sort"
+                       else self.spec.list_reverse)
+                if tpl:
+                    return tpl.format(x=list_base)
+                return self._mark_unsupported(
+                    f"list.{node.func.attr} (not available on the "
+                    f"{self.spec.name} backend)")
             # generic method call
             return f"{base}.{node.func.attr}({', '.join(args)})"
         # generic (user) function call: borrow list args where appropriate
