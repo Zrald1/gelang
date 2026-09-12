@@ -4,7 +4,7 @@ All notable changes to GE. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.2] — 2026-09-13
+## [0.1.4] — 2026-09-13
 
 Found by `scripts/e2e.py`, a new harness that compiles and runs 118
 programs on every installed backend and compares stdout with CPython.
