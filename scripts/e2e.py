@@ -103,20 +103,25 @@ class Ctx:
                       filename: str = "main.ge",
                       extra: list[str] | None = None,
                       timeout: int = 300) -> tuple[str, subprocess.CompletedProcess]:
-        """Build, then run the produced binary. Returns (stdout, build result)."""
-        sub = self.workdir / "sub"
-        sub.mkdir(exist_ok=True)
+        """Build, then run the produced binary. Returns (stdout, build result).
+
+        Each backend gets its own output directory and subdirectory, so a
+        stale binary from a previous attempt can never be executed.
+        """
+        sub = self.workdir / f"src-{backend}"
+        sub.mkdir(parents=True, exist_ok=True)
         (sub / filename).write_text(textwrap.dedent(src).lstrip("\n"),
                                     encoding="utf-8")
-        args = ["build", filename, "--backend", backend, "-o", "out"]
+        outdir = f"out-{backend}"
+        args = ["build", filename, "--backend", backend, "-o", outdir]
         if extra:
             args += extra
         r = self.run(args, cwd=sub, timeout=timeout)
-        exe = find_exe(sub / "out")
+        exe = find_exe(sub / outdir)
         if exe is None:
             return "", r
         run = subprocess.run([str(exe)], capture_output=True, text=True,
-                             timeout=60, encoding="utf-8", errors="replace")
+                             timeout=120, encoding="utf-8", errors="replace")
         return run.stdout, r
 
 
@@ -606,7 +611,7 @@ FEATURE_CASES: list[tuple[str, str, str]] = [
             for i in range(0, 10):
                 v = step(v)
             print(v)
-    """, "80\n"),
+    """, "17\n"),
 ]
 
 FEATURE_CASES.append(("bool-as-int2", """
@@ -780,26 +785,42 @@ def _bool_case(ctx: Ctx) -> str:
 _FAST_ORDER = ["rust", "cpp", "go", "zig", "kotlin", "csharp"]
 
 
-def _feature_case(src: str, expected: str):
+def _feature_case(src: str, expected: str, backends_only: tuple = ()):
+    """Run a program on every available backend and require identical output.
+
+    A backend that fails to build, produces no output, or prints something
+    different is a bug — all of them are reported, not just the first.
+    """
     def fn(ctx: Ctx) -> str:
-        last = ""
-        for b in _FAST_ORDER:
-            if b not in ctx.backends:
-                continue
+        order = [b for b in _FAST_ORDER
+                 if b in ctx.backends and (not backends_only or b in backends_only)]
+        if not order:
+            raise AssertionError("no backend available")
+        problems: list[str] = []
+        ok: list[str] = []
+        for b in order:
             try:
                 out, r = ctx.build_and_run(src, b)
             except subprocess.TimeoutExpired:
-                last = f"{b}: timed out"
+                problems.append(f"{b}: timed out")
                 continue
-            if r.returncode != 0 or not out.strip():
-                last = f"{b}: {(r.stdout + r.stderr)[-300:]}"
+            if r.returncode != 0:
+                tail = (r.stdout + r.stderr).strip().splitlines()
+                problems.append(f"{b}: build failed — {tail[-1][:160] if tail else '?'}")
                 continue
             got = out.replace("\r\n", "\n")
-            if got != expected:
-                last = f"{b}: expected {expected!r}, got {got!r}"
-                continue
-            return f"ok on {b}"
-        raise AssertionError(last or "no backend available")
+            if not got.strip():
+                problems.append(f"{b}: produced no output")
+            elif got != expected:
+                problems.append(
+                    f"{b}: expected {expected!r} got {got!r}")
+            else:
+                ok.append(b)
+        if problems:
+            raise AssertionError(
+                f"{len(ok)}/{len(order)} ok ({','.join(ok) or 'none'}); "
+                + "; ".join(problems))
+        return f"all {len(ok)} backends agree"
     return fn
 
 

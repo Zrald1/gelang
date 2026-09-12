@@ -156,6 +156,43 @@ fn ge_exp(x: f64) -> f64 { x.exp() }
 ''',
     "cpp": '''
 // GE Math runtime (C++)
+std::vector<std::string> geStrSplit(const std::string& s, const std::string& sep) {
+    std::vector<std::string> out;
+    if (sep.empty()) { out.push_back(s); return out; }
+    size_t pos = 0, found;
+    while ((found = s.find(sep, pos)) != std::string::npos) {
+        out.push_back(s.substr(pos, found - pos));
+        pos = found + sep.size();
+    }
+    out.push_back(s.substr(pos));
+    return out;
+}
+
+std::string geStrJoin(const std::vector<std::string>& v, const std::string& sep) {
+    std::string out;
+    for (size_t i = 0; i < v.size(); ++i) {
+        if (i) out += sep;
+        out += v[i];
+    }
+    return out;
+}
+
+std::vector<std::string> geDictKeys(const std::map<std::string, int64_t>& d) {
+    std::vector<std::string> ks;
+    ks.reserve(d.size());
+    for (const auto& kv : d) ks.push_back(kv.first);
+    return ks;
+}
+
+std::string geListStr(const std::vector<int64_t>& v) {
+    std::string s = "[";
+    for (size_t i = 0; i < v.size(); ++i) {
+        if (i) s += ", ";
+        s += std::to_string(v[i]);
+    }
+    return s + "]";
+}
+
 double ge_sqrt(double x) { return std::sqrt(x); }
 double ge_floor(double x) { return std::floor(x); }
 double ge_ceil(double x) { return std::ceil(x); }
@@ -180,6 +217,42 @@ static double GeExp(double x) { return System.Math.Exp(x); }
 ''',
     "go": '''
 // GE Math runtime (Go)
+func geAbsInt(x int64) int64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+func geMin2(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func geMax2(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func geListStr(v []int64) string {
+	parts := make([]string, len(v))
+	for i, x := range v {
+		parts[i] = strconv.FormatInt(x, 10)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func geBoolStr(b bool) string {
+	if b {
+		return "True"
+	}
+	return "False"
+}
+
 func geSqrt(x float64) float64 { return math.Sqrt(x) }
 func geFloor(x float64) float64 { return math.Floor(x) }
 func geCeil(x float64) float64 { return math.Ceil(x) }
@@ -205,6 +278,16 @@ fun ge_exp(x: Double): Double = exp(x)
 ''',
     "zig": '''
 // GE Math runtime (Zig)
+fn gePrintList(v: []const i64) void {
+    const w = std.io.getStdOut().writer();
+    w.print("[", .{}) catch unreachable;
+    for (v, 0..) |x, i| {
+        if (i > 0) w.print(", ", .{}) catch unreachable;
+        w.print("{d}", .{x}) catch unreachable;
+    }
+    w.print("]\\n", .{}) catch unreachable;
+}
+
 fn ge_sqrt(x: f64) f64 { return @sqrt(x); }
 fn ge_floor(x: f64) f64 { return @floor(x); }
 fn ge_ceil(x: f64) f64 { return @ceil(x); }

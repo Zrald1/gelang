@@ -14,9 +14,13 @@ from ..analyzer import FuncUnit
 SPEC = Spec(
     name="csharp",
     types={"int": "long", "float": "double", "bool": "bool", "str": "string", "None": "void"},
-    list_type="List<long>",
+    list_type="List<{T}>",
     list_param_type="List<long>",
     list_elem_type="long",
+    str_split="{x}.Split({sep}).ToList()",
+    str_join="string.Join({sep}, {x})",
+    list_slice="{x}.GetRange((int)({start}), (int)(({stop}) - ({start})))",
+    list_copy="new List<long>({x})",
     borrow_list_arg=False,
     range_call="({lo}..{hi})",
     range_step_call="({lo}..{hi}).Step({step})",
@@ -27,6 +31,7 @@ SPEC = Spec(
     print_str='Console.WriteLine({v})',
     print_bool='Console.WriteLine({v})',
     print_generic='Console.WriteLine({v})',
+    print_list='Console.WriteLine("[" + string.Join(", ", {v}) + "]")',
     int_cast="(long)({x})",
     float_cast="(double)({x})",
     float_div="((double)({l}) / (double)({r}))",
@@ -34,9 +39,13 @@ SPEC = Spec(
     sum_call="{it}.Sum()",
     abs_int="Math.Abs({x})",
     abs_float="Math.Abs({x})",
+    min2_call="Math.Min({a}, {b})",
+    max2_call="Math.Max({a}, {b})",
     min_call="{it}.Min()",
     max_call="{it}.Max()",
     pow_call="Math.Pow({l}, {r})",
+    pow_int="(long)Math.Pow({l}, {r})",
+    pow_float="Math.Pow({l}, {r})",
     append_call="{x}.Add({v})",
     index_call="{x}[(int)({i})]",
     comment="//",
@@ -57,8 +66,10 @@ SPEC = Spec(
     struct_field_template="    public {type} {name};",
     struct_new_template="static {name} {name}_New({params}) {{\n{body}\n}}",
     dict_type="Dictionary<string, {V}>",
+    set_type="HashSet<long>",
     dict_get="{d}[{k}]",
     dict_set="{d}[{k}] = {v}",
+    dict_keys="{x}.Keys",
     dict_contains="{d}.ContainsKey({k})",
     tuple_type="({T}, {T})",
     tuple_get="{t}.Item{i1}",
@@ -108,8 +119,12 @@ class CSharpEmitter(Emitter):
             self.lines.append(f"{ind}for (long {var} = {lo}; {var} < {hi}; {var}++) {{")
         else:
             iter_s = self.expr(it)
-            self.var_types[var] = "long"
-            self.lines.append(f"{ind}foreach (var {var} in {iter_s}) {{")
+            if self.infer_type(it) == "dict":
+                self.var_types[var] = "str"
+                self.lines.append(f"{ind}foreach (var {var} in {iter_s}.Keys) {{")
+            else:
+                self.var_types[var] = "long"
+                self.lines.append(f"{ind}foreach (var {var} in {iter_s}) {{")
         self.indent_lvl += 1
         for s in node.body:
             self.stmt(s)
@@ -133,9 +148,15 @@ class CSharpEmitter(Emitter):
     def stmt(self, node):  # type: ignore[override]
         # escape C# keywords in variable declarations
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            # bare `list` gets its element type from the value
+            _ann = self._ann_type(node.annotation)
+            _elem = (self._list_elem_of_value(node.value)
+                     if (_ann == "list" and node.value is not None) else "")
             name = self._esc(node.target.id)
             ann_type = self._ann_type(node.annotation)
             nt = self.py_to_native(ann_type)
+            if _elem and _elem != self.spec.list_elem_type:
+                nt = self.spec.list_type.format(T=_elem)
             if node.value is not None:
                 val = self.expr(node.value)
                 self.lines.append(f"{self.spec.indent * self.indent_lvl}{nt} {name} = {val};")
@@ -227,6 +248,11 @@ def emit_csharp(units: list[FuncUnit], entry: str | None,
     extern_fns: functions from other backends that this C# code calls.
     """
     emitter = CSharpEmitter(SPEC)
+    emitter.func_signatures = {
+        u.name: ([p for p, _t in u.params],
+                 dict(getattr(u, 'param_defaults', {})))
+        for u in units
+    }
     emitter.library_mode = library_mode
     emitter.constants = constants or {}
     emitted: dict[str, str] = {}
@@ -317,6 +343,9 @@ def emit_csharp(units: list[FuncUnit], entry: str | None,
             for line in fn.split("\n"):
                 indented_fns.append("    " + line)
         indented_fns.append(wrapper.rstrip())
+    elif not fns:
+        # entry rejected during emission; see the pipeline diagnostic
+        return prelude, emitted
     else:
         # rename main to Main for C# entry point
         # C# Main must return void or int (32-bit), not long

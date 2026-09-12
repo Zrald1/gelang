@@ -34,6 +34,8 @@ class TypeChecker:
         self.file = file
         self.errors = ErrorReporter()
         self.func_sigs: dict[str, tuple[list[str], str]] = {}  # name -> (param_types, ret_type)
+
+        self.func_required: dict[str, int] = {}
         self.func_names: set[str] = set()
         self.class_names: set[str] = set()
 
@@ -49,6 +51,8 @@ class TypeChecker:
             if u.supported and u.body:
                 param_types = [t for _, t in u.params]
                 self.func_sigs[u.name] = (param_types, u.ret_type)
+                self.func_required[u.name] = getattr(
+                    u, "n_required_params", len(param_types)) or len(param_types)
                 self.func_names.add(u.name)
         # collect class names
         if classes:
@@ -97,16 +101,25 @@ class TypeChecker:
             # check if calling a known function with wrong number of args
             if fname in self.func_sigs:
                 param_types, _ = self.func_sigs[fname]
-                if len(node.args) != len(param_types):
+                n_req = self.func_required.get(fname, len(param_types))
+                n_given = len(node.args)
+                if n_given < n_req or n_given > len(param_types):
+                    if n_req == len(param_types):
+                        expect = f"{len(param_types)} args"
+                    else:
+                        expect = (f"between {n_req} and "
+                                  f"{len(param_types)} args")
                     self.errors.error(
                         "GE002",
-                        f"function '{fname}' expects {len(param_types)} args, "
-                        f"got {len(node.args)}",
+                        f"function '{fname}' expects {expect}, "
+                        f"got {n_given}",
                         file=self.file, line=node.lineno,
                     )
             # check for undefined function calls
             elif fname not in ("print", "len", "range", "abs", "sum", "min", "max",
                                "float", "int", "str", "bool", "dict", "list", "tuple",
+                               "round", "sorted", "reversed", "enumerate", "zip",
+                               "any", "all", "pow", "divmod", "ord", "chr",
                                "ge_inline", "ge_raw", "ge_preamble"):
                 if fname not in self.class_names:
                     self.errors.error(

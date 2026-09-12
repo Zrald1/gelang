@@ -31,6 +31,16 @@ fn ge_append_file(path: []const u8, content: []const u8) bool {
 
 
 // GE Math runtime (Zig)
+fn gePrintList(v: []const i64) void {
+    const w = std.io.getStdOut().writer();
+    w.print("[", .{}) catch unreachable;
+    for (v, 0..) |x, i| {
+        if (i > 0) w.print(", ", .{}) catch unreachable;
+        w.print("{d}", .{x}) catch unreachable;
+    }
+    w.print("]\n", .{}) catch unreachable;
+}
+
 fn ge_sqrt(x: f64) f64 { return @sqrt(x); }
 fn ge_floor(x: f64) f64 { return @floor(x); }
 fn ge_ceil(x: f64) f64 { return @ceil(x); }

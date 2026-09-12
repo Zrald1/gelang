@@ -38,6 +38,11 @@ class FuncUnit:
     param_elem_types: dict[str, str] = field(default_factory=dict)
     # dict key/value types: {"d": ("str", "int")} means d is dict[str, int]
     param_dict_types: dict[str, tuple[str, str]] = field(default_factory=dict)
+    # Number of leading parameters without a default. Calls may
+    # supply between n_required_params and len(params) arguments.
+    n_required_params: int = 0
+    # Default expressions per parameter name, as source text.
+    param_defaults: dict[str, str] = field(default_factory=dict)
 
     def mark_unsupported(self, reason: str) -> None:
         self.supported = False
@@ -310,6 +315,19 @@ def parse_source_full(source: str) -> tuple[list[FuncUnit], list[ClassUnit]]:
             ret = _norm_type(node.returns)
             if ret not in SCALAR_TYPES and ret not in CONTAINER_TYPES and ret != "None" and ret not in _class_names:
                 ret = "any"
+            # Default arguments: a call may supply between n_required and
+            # len(params) arguments; the rest are filled in at the call site.
+            _args = node.args.args
+            _n_defaults = len(node.args.defaults)
+            _n_required = len(_args) - _n_defaults
+            _param_defaults: dict[str, str] = {}
+            for _i, _a in enumerate(_args):
+                if _i >= _n_required:
+                    _d = node.args.defaults[_i - _n_required]
+                    try:
+                        _param_defaults[_a.arg] = ast.unparse(_d)
+                    except Exception:
+                        _param_defaults[_a.arg] = ""
             unit = FuncUnit(
                 name=node.name,
                 lineno=node.lineno,
@@ -319,6 +337,8 @@ def parse_source_full(source: str) -> tuple[list[FuncUnit], list[ClassUnit]]:
                 source="\n".join(src_lines[node.lineno - 1 : node.end_lineno]),
                 param_elem_types=param_elem_types,
                 param_dict_types=param_dict_types,
+                n_required_params=_n_required,
+                param_defaults=_param_defaults,
             )
             # parse @rust/@cpp/@dart/@csharp/@zig/@go decorators for per-function backend selection
             for dec in node.decorator_list:

@@ -14,9 +14,13 @@ from ..analyzer import FuncUnit
 SPEC = Spec(
     name="kotlin",
     types={"int": "Long", "float": "Double", "bool": "Boolean", "str": "String", "None": "Unit"},
-    list_type="MutableList<Long>",
+    list_type="MutableList<{T}>",
     list_param_type="MutableList<Long>",
     list_elem_type="Long",
+    str_split="{x}.split({sep}).toMutableList()",
+    str_join="{x}.joinToString({sep})",
+    list_slice="{x}.subList(({start}).toInt(), ({stop}).toInt()).toMutableList()",
+    list_copy="{x}.toMutableList()",
     borrow_list_arg=False,
     range_call="({lo}..{hi})",
     range_step_call="({lo}..{hi} step {step})",
@@ -25,8 +29,9 @@ SPEC = Spec(
     print_int='println({v})',
     print_float='println({v})',
     print_str='println({v})',
-    print_bool='println({v})',
+    print_bool='println(if ({v}) "True" else "False")',
     print_generic='println({v})',
+    print_list='println({v}.joinToString(", ", "[", "]"))',
     int_cast="{x}.toLong()",
     float_cast="{x}.toDouble()",
     float_div="({l}.toDouble() / {r}.toDouble())",
@@ -34,9 +39,13 @@ SPEC = Spec(
     sum_call="{it}.sum()",
     abs_int="abs({x})",
     abs_float="abs({x})",
+    min2_call="minOf({a}, {b})",
+    max2_call="maxOf({a}, {b})",
     min_call="{it}.minOrNull()!!",
     max_call="{it}.maxOrNull()!!",
-    pow_call="Math.pow({l}.toDouble(), {r}.toDouble()).toLong()",
+    pow_call="{l}.toDouble().pow({r}.toDouble()).toLong()",
+    pow_int="{l}.toDouble().pow({r}.toDouble()).toLong()",
+    pow_float="{l}.pow({r})",
     append_call="{x}.add({v})",
     index_call="{x}[{i}.toInt()]",
     comment="//",
@@ -58,8 +67,10 @@ SPEC = Spec(
     struct_field_template="    val {type}: {name},",
     struct_new_template="fun {name}_new({params}): {name} {{\n{body}\n}}",
     dict_type="HashMap<String, {V}>",
-    dict_get="{d}[{k}]",
+    set_type="MutableSet<Long>",
+    dict_get="{d}[{k}]!!",
     dict_set="{d}[{k}] = {v}",
+    dict_keys="{x}.keys",
     dict_contains="{d}.containsKey({k})",
     tuple_type="Pair<{T}, {T}>",
     tuple_get="{t}.{field}",
@@ -146,8 +157,12 @@ class KotlinEmitter(Emitter):
             self.lines.append(f"{ind}for ({var} in {lo} until {hi}) {{")
         else:
             iter_s = self.expr(it)
-            self.var_types[var] = "long"
-            self.lines.append(f"{ind}for ({var} in {iter_s}) {{")
+            if self.infer_type(it) == "dict":
+                self.var_types[var] = "str"
+                self.lines.append(f"{ind}for ({var} in {iter_s}.keys) {{")
+            else:
+                self.var_types[var] = "long"
+                self.lines.append(f"{ind}for ({var} in {iter_s}) {{")
         self.indent_lvl += 1
         for s in node.body:
             self.stmt(s)
@@ -217,6 +232,11 @@ def emit_kotlin(units: list[FuncUnit], entry: str | None,
     extern_fns: functions from other backends that this Kotlin code calls.
     """
     emitter = KotlinEmitter(SPEC)
+    emitter.func_signatures = {
+        u.name: ([p for p, _t in u.params],
+                 dict(getattr(u, 'param_defaults', {})))
+        for u in units
+    }
     emitter.library_mode = library_mode
     emitter.constants = constants or {}
     emitted: dict[str, str] = {}
@@ -295,6 +315,9 @@ def emit_kotlin(units: list[FuncUnit], entry: str | None,
         else:
             wrapper = f"fun main() {{\n    {entry_u.name}()\n}}\n"
         fns.append(wrapper)
+    elif not fns:
+        # entry rejected during emission; see the pipeline diagnostic
+        return prelude + "\n".join(fns), emitted
     else:
         # Kotlin main() must return Unit (void)
         # Rename the user's main() to __ge_main() and add a wrapper

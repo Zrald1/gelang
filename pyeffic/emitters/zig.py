@@ -13,9 +13,11 @@ from ..analyzer import FuncUnit
 SPEC = Spec(
     name="zig",
     types={"int": "i64", "float": "f64", "bool": "bool", "str": "[]const u8", "None": "void"},
-    list_type="[]const i64",
+    list_type="[]const {T}",
     list_param_type="[]const i64",
     list_elem_type="i64",
+    list_slice="{x}[@intCast({start})..@intCast({stop})]",
+    list_copy="{x}",
     borrow_list_arg=False,
     range_call="({lo}..{hi})",
     range_step_call="({lo}..{hi})",
@@ -24,19 +26,26 @@ SPEC = Spec(
     print_int='std.io.getStdOut().writer().print("{{d}}\\n", .{{{v}}}) catch unreachable',
     print_float='std.io.getStdOut().writer().print("{{d}}\\n", .{{{v}}}) catch unreachable',
     print_str='std.io.getStdOut().writer().print("{{s}}\\n", .{{{v}}}) catch unreachable',
-    print_bool='std.io.getStdOut().writer().print("{}\\n", .{{{v}}}) catch unreachable',
+    print_bool='std.io.getStdOut().writer().print("{{s}}\\n", .{{if ({v}) "True" else "False"}}) catch unreachable',
     print_generic='std.io.getStdOut().writer().print("{{any}}\\n", .{{{v}}}) catch unreachable',
+    print_list='gePrintList({v})',
     int_cast="@as(i64, {x})",
     float_cast="@as(f64, {x})",
     float_div="(@as(f64, {l}) / @as(f64, {r}))",
     floor_div="@divFloor({l}, {r})",
     sum_call="blk: {{ var s: i64 = 0; for ({it}) |v| {{ s += v; }} break :blk s; }}",
-    abs_int="@intCast(if ({x} < 0) -{x} else {x})",
+    abs_int="@as(i64, @intCast(if ({x} < 0) -{x} else {x}))",
     abs_float="@abs({x})",
+    min2_call="@min({a}, {b})",
+    max2_call="@max({a}, {b})",
     min_call="@min({it}...)",
     max_call="@max({it}...)",
     pow_call="std.math.pow(i64, {l}, {r})",
-    append_call="{x}.append({v}) catch unreachable",
+    pow_int="std.math.pow(i64, {l}, {r})",
+    pow_float="std.math.pow(f64, {l}, {r})",
+    # Zig lists are `[]const i64` slices and cannot grow; list.append
+    # is rejected with a clear diagnostic rather than emitting invalid Zig.
+    append_call="",
     index_call="{x}[@as(usize, @intCast({i}))]",
     comment="//",
     fn_template="{sig} {{\n{body}\n}}",
@@ -194,6 +203,7 @@ class ZigEmitter(Emitter):
                 self.lines.append(f"{ind}_ = {self.expr(node.value)};")
                 return
         if isinstance(node, ast.AnnAssign) and node.value is not None:
+            # bare `list` gets its element type from the value
             target = node.target.id if isinstance(node.target, ast.Name) else self.expr(node.target)
             t = self._ann_type(node.annotation) if isinstance(node.target, ast.Name) else self.infer_type(node.value)
             if isinstance(node.target, ast.Name):
@@ -244,8 +254,16 @@ class ZigEmitter(Emitter):
             self.lines.append(f"{ind}while ({var} < {hi}) : ({var} += 1) {{")
         else:
             iter_s = self.expr(it)
-            self.var_types[var] = "long"
-            self.lines.append(f"{ind}for ({iter_s}) |{var}| {{")
+            if self.infer_type(it) == "dict":
+                # Zig has no allocator here, so walk the map's key iterator
+                # instead of materialising a key list.
+                self.var_types[var] = "str"
+                self.lines.append(f"{ind}var __keys_{var} = {iter_s}.keyIterator();")
+                self.lines.append(f"{ind}while (__keys_{var}.next()) |__kp_{var}| {{")
+                self.lines.append(f"{ind}    const {var} = __kp_{var}.*;")
+            else:
+                self.var_types[var] = "long"
+                self.lines.append(f"{ind}for ({iter_s}) |{var}| {{")
         self.indent_lvl += 1
         for s in node.body:
             self.stmt(s)
@@ -315,6 +333,11 @@ def emit_zig(units: list[FuncUnit], entry: str | None,
     extern_fns: functions from other backends that this Zig code calls.
     """
     emitter = ZigEmitter(SPEC)
+    emitter.func_signatures = {
+        u.name: ([p for p, _t in u.params],
+                 dict(getattr(u, 'param_defaults', {})))
+        for u in units
+    }
     emitter.library_mode = library_mode
     emitter.constants = constants or {}
     emitted: dict[str, str] = {}
@@ -392,6 +415,10 @@ def emit_zig(units: list[FuncUnit], entry: str | None,
         else:
             wrapper = f"pub fn main() void {{\n    _ = {entry_u.name}();\n}}\n"
         fns.append(wrapper)
+    elif not fns:
+        # the entry function was rejected during emission; the pipeline
+        # already has the reason, so emit a stub rather than crashing
+        return prelude, emitted
     else:
         # Zig main() must return void (or u8 for exit code)
         # Rename the user's main() to __ge_main() and add a wrapper

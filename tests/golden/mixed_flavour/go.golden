@@ -2,6 +2,7 @@ package main
 
 import "fmt"
 import "strings"
+import "strconv"
 import "sort"
 import "os"
 import "math"
@@ -41,6 +42,42 @@ func geAppendFile(path string, content string) bool {
 
 
 // GE Math runtime (Go)
+func geAbsInt(x int64) int64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+func geMin2(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func geMax2(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func geListStr(v []int64) string {
+	parts := make([]string, len(v))
+	for i, x := range v {
+		parts[i] = strconv.FormatInt(x, 10)
+	}
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+func geBoolStr(b bool) string {
+	if b {
+		return "True"
+	}
+	return "False"
+}
+
 func geSqrt(x float64) float64 { return math.Sqrt(x) }
 func geFloor(x float64) float64 { return math.Floor(x) }
 func geCeil(x float64) float64 { return math.Ceil(x) }

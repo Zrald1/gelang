@@ -293,10 +293,22 @@ def get_tools_status() -> dict[str, dict]:
     """Get status of all known toolchains."""
     from .config import detect_compilers
     detected = detect_compilers()
+    # CompilerInfo field names differ from the public toolchain names
+    # (`dotnet` backs C#, `kotlinc` backs Kotlin), so map them explicitly.
+    fields = {
+        "rust": "rustc",
+        "cpp": "cpp",
+        "csharp": "dotnet",
+        "zig": "zig",
+        "go": "go",
+        "kotlin": "kotlinc",
+        "dart": "dart",
+    }
     status = {}
     for name in ["rust", "cpp", "csharp", "zig", "go", "kotlin", "dart"]:
-        available = is_toolchain_available(name) or getattr(detected, name, None) is not None
-        path = get_toolchain_path(name) or getattr(detected, name, None)
+        detected_path = getattr(detected, fields.get(name, name), None)
+        available = is_toolchain_available(name) or detected_path is not None
+        path = get_toolchain_path(name) or detected_path
         downloadable = name in DOWNLOAD_URLS
         status[name] = {
             "available": bool(available),

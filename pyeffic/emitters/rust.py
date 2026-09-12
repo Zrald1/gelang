@@ -12,6 +12,10 @@ SPEC = Spec(
     list_type="Vec<{T}>",
     list_param_type="&[i64]",
     list_elem_type="i64",
+    str_split="{x}.split({sep}.as_str()).map(|s| s.to_string()).collect::<Vec<String>>()",
+    str_join="{x}.join({sep}.as_str())",
+    list_slice="{x}[({start}) as usize..({stop}) as usize].to_vec()",
+    list_copy="{x}.clone()",
     borrow_list_arg=True,
     range_call="({lo}..{hi})",
     range_step_call="({lo}..{hi}).step_by({step} as usize)",
@@ -20,18 +24,23 @@ SPEC = Spec(
     print_int='println!("{{}}", {v})',
     print_float='println!("{{}}", {v})',
     print_str='println!("{{}}", {v})',
-    print_bool='println!("{{}}", {v})',
+    print_bool='println!("{{}}", if {v} {{ "True" }} else {{ "False" }})',
     print_generic='println!("{{:?}}", {v})',
+    print_list='println!("{{:?}}", {v})',
     int_cast="{x} as i64",
     float_cast="{x} as f64",
     float_div="({l} as f64 / {r} as f64)",
     floor_div="({l} / {r})",
     sum_call="{it}.iter().sum::<i64>()",
-    abs_int="{x}.abs()",
+    abs_int="i64::abs({x})",
     abs_float="{x}.abs()",
+    min2_call="std::cmp::min({a}, {b})",
+    max2_call="std::cmp::max({a}, {b})",
     min_call="{it}.iter().min().unwrap()",
     max_call="{it}.iter().max().unwrap()",
     pow_call="{l}.pow({r} as u32)",
+    pow_int="i64::pow({l}, {r} as u32)",
+    pow_float="f64::powf({l}, {r})",
     append_call="{x}.push({v})",
     index_call="{x}[{i} as usize]",
     comment="//",
@@ -52,8 +61,11 @@ SPEC = Spec(
     struct_field_template="    {type}: {name},",
     struct_new_template="fn {name}_new({params}) -> {name} {{\n{body}\n}}",
     dict_type="std::collections::HashMap<String, {V}>",
+    set_type="std::collections::HashSet<i64>",
     dict_get="{d}.get(&{k}).copied().unwrap_or(0)",
     dict_set="{d}.insert({k}, {v})",
+    dict_keys="{x}.keys().cloned().collect::<Vec<String>>()",
+    foreach_dict_template="for {var} in {iter}",
     dict_contains="{d}.contains_key(&{k})",
     tuple_type="({T}, {T})",
     tuple_get="{t}.{i}",
@@ -188,6 +200,11 @@ def emit_rust(units: list[FuncUnit], entry: str | None,
     constants: module-level constants to inline (name -> value).
     """
     emitter = RustEmitter(SPEC)
+    emitter.func_signatures = {
+        u.name: ([p for p, _t in u.params],
+                 dict(getattr(u, 'param_defaults', {})))
+        for u in units
+    }
     emitter.library_mode = library_mode
     emitter.export_names = set(export_fns) if export_fns else set()
     emitter.constants = constants or {}

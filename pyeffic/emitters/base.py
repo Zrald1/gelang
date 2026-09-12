@@ -48,6 +48,31 @@ class Spec:
     var_decl_template: str = "{nt} {target} = {val};"  # typed variable declaration
     ffi_prefix: str = ""  # decoration for C-ABI exports in library mode
     indent: str = "    "
+    # Type-aware exponentiation. Integer `**` and float `**` need different
+    # target syntax in most languages; when these are empty the emitter falls
+    # back to pow_call.
+    pow_int: str = ""
+    pow_float: str = ""
+    # two-argument min(a, b) / max(a, b). Most targets have no plain
+    # min/max function, so these carry the target-specific spelling.
+    min2_call: str = ""
+    max2_call: str = ""
+    # List slicing. `{x}` is the list, `{start}` and `{stop}` are integer
+    # bounds. list_copy is the full-slice form (`xs[:]`), which Python
+    # defines as a shallow copy.
+    # str.split(sep) / sep.join(list). Empty means unsupported.
+    str_split: str = ""
+    str_join: str = ""
+    list_slice: str = ""
+    list_copy: str = ""
+    # Iterating a dict in Python yields its keys. `dict_keys` is an
+    # expression producing those keys; `foreach_dict_template` is the
+    # loop head to use with it (Go ranges a map differently).
+    dict_keys: str = ""
+    foreach_dict_template: str = ""
+    # Printing a sequence. Python renders lists as `[1, 2, 3]`, so every
+    # backend must match that rather than its own native format.
+    print_list: str = ""
     # string operations
     str_concat: str = "{l} + {r}"  # string concatenation
     str_len: str = "{x}.length()"  # string length (C++ style)
@@ -74,6 +99,7 @@ class Spec:
     dict_contains: str = "({d}.find({k}) != {d}.end())"
     # tuple support
     tuple_type: str = "std::tuple<{T}>"
+    set_type: str = ""  # native set type
     tuple_get: str = "std::get<{i}>({t})"
     # list length (separate from len_call which may be used for strings)
     list_len: str = "{x}.size()"
@@ -90,6 +116,9 @@ class Emitter:
         self.params: set[str] = set()  # param names (already borrowed if list)
         self.library_mode: bool = False  # emit C-ABI exports instead of a main()
         self.extern_names: set[str] = set()  # extern "C" fns from other backends
+        # {name: ([param names], {param: default source text})} so a call site
+        # that omits defaults can fill them in.
+        self.func_signatures: dict[str, tuple[list[str], dict[str, str]]] = {}
         self.force_extern_c: bool = False  # force extern "C" on all functions (multi-backend)
         self.export_names: set[str] = set()  # Rust fns called from C++ — export them
         self.class_names: set[str] = set()  # known class names for constructor calls
@@ -179,6 +208,10 @@ class Emitter:
             return self.spec.dict_type.format(V=self.spec.list_elem_type)
         if t == "tuple":
             return self.spec.tuple_type.format(T=self.spec.list_elem_type)
+        if t == "set":
+            if self.spec.set_type:
+                return self.spec.set_type
+            return self.spec.list_type.format(T=self.spec.list_elem_type)
         # class type — use the class name directly
         if t in self.class_names:
             return t
@@ -220,6 +253,12 @@ class Emitter:
             return self.spec.dict_type.format(V=self.spec.list_elem_type)
         if t == "tuple":
             return self.spec.tuple_type.format(T=self.spec.list_elem_type)
+        if t == "set":
+            if self.spec.set_type:
+                if self.spec.name == "cpp":
+                    return f"const {self.spec.set_type}&"
+                return self.spec.set_type
+            return self.spec.list_param_type
         # class type — pass by value (or const ref in C++)
         if t in self.class_names:
             if self.spec.name == "cpp":
@@ -334,6 +373,12 @@ class Emitter:
                 self.var_types[target] = t
                 self.declared.add(target)
             nt = self.py_to_native(t)
+            if t == "list":
+                # a bare `list` annotation carries no element type; take it
+                # from the value so `xs = "a,b".split(",")` is a string list
+                elem = self._list_elem_of_value(node.value)
+                if elem and elem != self.spec.list_elem_type:
+                    nt = self.spec.list_type.format(T=elem)
             if self.spec.name == "rust":
                 self.lines.append(f"{ind}let mut {target}: {nt} = {self.expr(node.value)};")
             else:
@@ -754,7 +799,12 @@ class Emitter:
         msg = f"{self.current_func}: {feature}"
         if msg not in self.unsupported_emissions:
             self.unsupported_emissions.append(msg)
-        return f"/*unsupported: {feature}*/"
+        # Use the backend's own comment syntax: a C-style comment is not
+        # valid in Zig, and the placeholder still has to parse.
+        marker = getattr(self.spec, "comment", "//") or "//"
+        if marker.startswith("/*"):
+            return f"/*unsupported: {feature}*/"
+        return f"{marker} unsupported: {feature}"
 
     def _ident(self, name: str) -> str:
         """Escape a local/parameter name that collides with a target keyword.
@@ -858,12 +908,21 @@ class Emitter:
             self._for_zip(node, ind)
             return
         else:
-            # iterate a container (list)
+            # iterate a container
             iter_s = self.expr(it)
-            elem_type = self._iter_elem_type(it)
-            self.var_types[var] = elem_type
-            head = self.spec.foreach_template.format(var=var, iter=iter_s,
-                                                      etype=self.spec.list_elem_type)
+            if self.infer_type(it) == "dict" and self.spec.dict_keys:
+                # Python iterates dict keys, not (key, value) pairs
+                iter_s = self.spec.dict_keys.format(x=iter_s)
+                tmpl = (self.spec.foreach_dict_template
+                        or self.spec.foreach_template)
+                self.var_types[var] = "str"
+                head = tmpl.format(var=var, iter=iter_s,
+                                   etype=self.spec.list_elem_type)
+            else:
+                elem_type = self._iter_elem_type(it)
+                self.var_types[var] = elem_type
+                head = self.spec.foreach_template.format(
+                    var=var, iter=iter_s, etype=self.spec.list_elem_type)
             self.lines.append(f"{ind}{head} {{")
         self.indent_lvl += 1
         for s in node.body:
@@ -991,7 +1050,7 @@ class Emitter:
             if isinstance(node.op, ast.FloorDiv):
                 return self.spec.floor_div.format(l=left, r=right)
             if isinstance(node.op, ast.Pow):
-                return self.spec.pow_call.format(l=left, r=right)
+                return self._pow(left, right, node)
             if isinstance(node.op, ast.Add):
                 lt = self.infer_type(node.left)
                 rt = self.infer_type(node.right)
@@ -1079,8 +1138,11 @@ class Emitter:
             orelse = self.expr(node.orelse)
             if self.spec.name == "rust":
                 return f"if {cond} {{ {body} }} else {{ {orelse} }}"
-            if self.spec.name in ("cpp", "csharp", "kotlin"):
+            if self.spec.name in ("cpp", "csharp"):
                 return f"({cond} ? {body} : {orelse})"
+            if self.spec.name == "kotlin":
+                # Kotlin has no ?: operator — it uses an if expression
+                return f"(if ({cond}) {body} else {orelse})"
             if self.spec.name == "go":
                 return f"(func() int64 {{ if {cond} {{ return {body} }}; return {orelse} }}())"
             if self.spec.name == "zig":
@@ -1104,9 +1166,18 @@ class Emitter:
                     if stop:
                         return self.spec.str_slice_end.format(x=base, end=stop)
                     return base  # full slice s[:] = s
-                # list slicing — not fully supported, mark as unsupported
-                if start and stop:
-                    return self._mark_unsupported(f"list slice {base}[{start}:{stop}]")
+                # list slicing — xs[a:b], xs[a:], xs[:b], xs[:]
+                if self.spec.list_slice:
+                    length = self.spec.len_call.format(x=base)
+                    if not start:
+                        start = self.spec.int_cast.format(x="0")
+                    if not stop:
+                        stop = length
+                    if not sl.lower and not sl.upper:
+                        if self.spec.list_copy:
+                            return self.spec.list_copy.format(x=base)
+                    return self.spec.list_slice.format(
+                        x=base, start=start, stop=stop)
                 return self._mark_unsupported(f"list slice {base}")
             idx = self.expr(node.slice)
             if base_type == "dict":
@@ -1135,17 +1206,22 @@ class Emitter:
             return self.spec.index_call.format(x=base, i=idx)
         if isinstance(node, ast.List):
             elems = ", ".join(self.expr(e) for e in node.elts)
+            # a literal of strings needs a string element type, not the
+            # backend's default integer element
+            elem = self._list_elem_of_value(node) or self.spec.list_elem_type
             if self.spec.name == "rust":
                 return f"vec![{elems}]"
             if self.spec.name == "go":
-                return f"[]{self.spec.list_elem_type}{{{elems}}}"
+                return f"[]{elem}{{{elems}}}"
             if self.spec.name == "kotlin":
                 return f"mutableListOf({elems})"
             if self.spec.name == "zig":
                 return f"&[_]i64{{ {elems} }}"
             if self.spec.name == "csharp":
-                return f"new {self.spec.list_type}{{{elems}}}"
-            return f"std::vector<{self.spec.list_elem_type}>{{{elems}}}"
+                lt = self.spec.list_type.format(T=elem)
+                return f"new {lt}{{{elems}}}"
+            lt = self.spec.list_type.format(T=elem)
+            return f"{lt}{{{elems}}}"
         if isinstance(node, ast.ListComp):
             return self._list_comp(node)
         if isinstance(node, ast.Dict):
@@ -1186,15 +1262,36 @@ class Emitter:
             if self.spec.name == "csharp":
                 return f"new HashSet<long>{{{elems}}}"
             if self.spec.name == "go":
-                return f"map[int64_t]struct{{}}{{}}"
+                # Go has no set type; GE uses map[elem]bool. Go rejects
+                # duplicate *constant* keys at compile time, so literals are
+                # deduplicated here (a runtime set would collapse them anyway).
+                seen: list[str] = []
+                for e in node.elts:
+                    rendered = self.expr(e)
+                    if rendered not in seen:
+                        seen.append(rendered)
+                if not seen:
+                    return "map[int64]bool{}"
+                pairs = ", ".join(f"{v}: true" for v in seen)
+                return f"map[int64]bool{{{pairs}}}"
             if self.spec.name == "kotlin":
                 return f"hashSetOf({elems})"
+            if self.spec.name == "zig":
+                # no allocator-backed set in the Zig runtime
+                return self._mark_unsupported("set literal (Zig)")
             return f"std::set<int64_t>{{{elems}}}"
         if isinstance(node, ast.SetComp):
             return self._set_comp(node)
         if isinstance(node, ast.DictComp):
             return self._dict_comp(node)
         if isinstance(node, ast.Tuple):
+            # GE models tuples as fixed-width pairs. Anything else would need
+            # a per-arity native type (Go structs, Kotlin Triple, ...), so it
+            # is rejected loudly rather than emitted as broken code.
+            if len(node.elts) != 2:
+                return self._mark_unsupported(
+                    f"tuple of {len(node.elts)} elements "
+                    f"(only 2-element tuples are supported)")
             elems = ", ".join(self.expr(e) for e in node.elts)
             if self.spec.name == "rust":
                 return f"({elems})"
@@ -1273,10 +1370,16 @@ class Emitter:
         if fname == "sum":
             return self.spec.sum_call.format(it=self.expr(node.args[0]))
         if fname in ("min", "max"):
-            tmpl = self.spec.min_call if fname == "min" else self.spec.max_call
+            is_min = fname == "min"
+            tmpl = self.spec.min_call if is_min else self.spec.max_call
             raw = [self.expr(a) for a in node.args]
             if len(raw) == 1:
                 return tmpl.format(it=raw[0])
+            if len(raw) == 2:
+                pair = (self.spec.min2_call if is_min
+                        else self.spec.max2_call)
+                if pair:
+                    return pair.format(a=raw[0], b=raw[1])
             return f"{fname}({', '.join(raw)})"
         if fname == "pow":
             return self.spec.pow_call.format(l=self.expr(node.args[0]), r=self.expr(node.args[1]))
@@ -1584,8 +1687,26 @@ class Emitter:
             return self._stdlib_call("ge_log", node.args)
         if fname == "exp":
             return self._stdlib_call("ge_exp", node.args)
+        if (isinstance(node.func, ast.Attribute) and node.func.attr == "split"
+                and len(node.args) == 1):
+            if not self.spec.str_split:
+                return self._mark_unsupported(
+                    f"str.split (not available on the {self.spec.name} backend)")
+            return self.spec.str_split.format(
+                x=self.expr(node.func.value), sep=self.expr(node.args[0]))
+        if (isinstance(node.func, ast.Attribute) and node.func.attr == "join"
+                and len(node.args) == 1):
+            if not self.spec.str_join:
+                return self._mark_unsupported(
+                    f"str.join (not available on the {self.spec.name} backend)")
+            return self.spec.str_join.format(
+                x=self.expr(node.args[0]), sep=self.expr(node.func.value))
         if isinstance(node.func, ast.Attribute) and node.func.attr == "append":
             base = self.expr(node.func.value)
+            if not self.spec.append_call:
+                return self._mark_unsupported(
+                    f"list.append (the {self.spec.name} backend models lists "
+                    f"as fixed slices)")
             return self.spec.append_call.format(x=base, v=self.expr(node.args[0]))
         # super().method(args) -> ParentClass_method(_self, args)
         if (isinstance(node.func, ast.Attribute) and
@@ -1674,11 +1795,35 @@ class Emitter:
                 # **kwargs — not supported, skip
                 continue
             args.append(self.expr(kw.value))
+        args = self._fill_defaults(fname, args, node)
         call_str = f"{fname}({', '.join(args)})"
         # wrap extern "C" calls in unsafe block (Rust requires this)
         if fname in self.extern_names and self.spec.name == "rust":
             return f"unsafe {{ {call_str} }}"
         return call_str
+
+    def _fill_defaults(self, fname: str, args: list[str],
+                       node: ast.Call) -> list[str]:
+        """Append default arguments a call site omitted.
+
+        `def f(a, b=10)` called as `f(5)` must emit `f(5, 10)` in the target
+        language, which has no notion of Python default parameters.
+        """
+        if node.keywords:
+            return args
+        sig = self.func_signatures.get(fname)
+        if not sig:
+            return args
+        names, defaults = sig
+        if len(args) >= len(names):
+            return args
+        filled = list(args)
+        for name in names[len(filled):]:
+            d = defaults.get(name)
+            if d is None or d == "":
+                break
+            filled.append(d)
+        return filled
 
     def _str_call(self, arg: ast.AST) -> str:
         """Convert a value to string."""
@@ -2201,6 +2346,8 @@ class Emitter:
             return self.spec.print_float.format(v=v)
         if t == "bool":
             return self.spec.print_bool.format(v=v)
+        if t in ("list", "tuple", "set") and self.spec.print_list:
+            return self.spec.print_list.format(v=v)
         # fallback to heuristics on the source text
         if any(c in v for c in ".") and not v.startswith('"'):
             return self.spec.print_float.format(v=v)
@@ -2225,6 +2372,50 @@ class Emitter:
             base = _ann_base(node)
             return base if base in ("list", "dict", "tuple", "set") else "list"
         return "int"
+
+    def _list_elem_of_value(self, node: ast.AST) -> str:
+        """Native element type of a list-producing expression, or "".
+
+        A bare `list` annotation says nothing about the element type, so it is
+        taken from the value: `"a,b".split(",")` yields strings, not ints.
+        """
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)):
+            attr = node.func.attr
+            if attr in ("split", "splitlines", "keys"):
+                return self.spec.types.get("str") or self._native_elem_type("str")
+            if attr == "values":
+                return self.spec.list_elem_type
+            if attr in ("copy", "sorted", "reverse"):
+                return self._list_elem_of_value(node.func.value) or ""
+            if attr == "split" or attr == "items":
+                return self.spec.types.get("str", "String")
+        if isinstance(node, ast.List):
+            types = [self.infer_type(e) for e in node.elts]
+            types = [t for t in types if t]
+            if types and all(t == types[0] for t in types):
+                return self._native_elem_type(types[0])
+        if isinstance(node, ast.ListComp):
+            return self._native_elem_type(self.infer_type(node.elt))
+        if isinstance(node, ast.Subscript):
+            return self._list_elem_of_value(node.value)
+        return ""
+
+    def _pow(self, left: str, right: str, node: ast.AST) -> str:
+        """Render `a ** b`.
+
+        Integer and float exponentiation need different target syntax, and a
+        bare literal like `2 ** 10` is ambiguous in Rust, so the operand type
+        decides which template is used.
+        """
+        lt = self.infer_type(node.left)
+        rt = self.infer_type(node.right)
+        is_float = lt == "float" or rt == "float"
+        if is_float and self.spec.pow_float:
+            return self.spec.pow_float.format(l=left, r=right)
+        if not is_float and self.spec.pow_int:
+            return self.spec.pow_int.format(l=left, r=right)
+        return self.spec.pow_call.format(l=left, r=right)
 
     def infer_type(self, node: ast.AST) -> str:
         if isinstance(node, ast.Constant):

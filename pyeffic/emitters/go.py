@@ -13,9 +13,13 @@ from ..analyzer import FuncUnit
 SPEC = Spec(
     name="go",
     types={"int": "int64", "float": "float64", "bool": "bool", "str": "string", "None": ""},
-    list_type="[]int64",
+    list_type="[]{T}",
     list_param_type="[]int64",
     list_elem_type="int64",
+    str_split="strings.Split({x}, {sep})",
+    str_join="strings.Join({x}, {sep})",
+    list_slice="append([]int64(nil), {x}[{start}:{stop}]...)",
+    list_copy="append([]int64(nil), {x}...)",
     borrow_list_arg=False,
     range_call="({lo}..{hi})",
     range_step_call="({lo}..{hi})",
@@ -24,18 +28,23 @@ SPEC = Spec(
     print_int='fmt.Println({v})',
     print_float='fmt.Println({v})',
     print_str='fmt.Println({v})',
-    print_bool='fmt.Println({v})',
+    print_bool='fmt.Println(geBoolStr({v}))',
     print_generic='fmt.Println({v})',
+    print_list='fmt.Println(geListStr({v}))',
     int_cast="int64({x})",
     float_cast="float64({x})",
     float_div="(float64({l}) / float64({r}))",
     floor_div="({l} / {r})",
     sum_call="func() int64 {{ var s int64; for _, v := range {it} {{ s += v }}; return s }}()",
-    abs_int="abs({x})",
+    abs_int="geAbsInt({x})",
     abs_float="math.Abs({x})",
+    min2_call="geMin2({a}, {b})",
+    max2_call="geMax2({a}, {b})",
     min_call="func() int64 {{ var m int64; for i, v := range {it} {{ if i == 0 || v < m {{ m = v }} }}; return m }}()",
     max_call="func() int64 {{ var m int64; for i, v := range {it} {{ if i == 0 || v > m {{ m = v }} }}; return m }}()",
     pow_call="int64(math.Pow(float64({l}), float64({r})))",
+    pow_int="int64(math.Pow(float64({l}), float64({r})))",
+    pow_float="math.Pow({l}, {r})",
     append_call="{x} = append({x}, {v})",
     index_call="{x}[{i}]",
     comment="//",
@@ -58,8 +67,11 @@ SPEC = Spec(
     struct_field_template="\t{type} {name}",
     struct_new_template="func {name}_New({params}) {name} {{\n{body}\n}}",
     dict_type="map[string]{V}",
+    set_type="map[int64]bool",
     dict_get="{d}[{k}]",
     dict_set="{d}[{k}] = {v}",
+    dict_keys="{x}",
+    foreach_dict_template="for {var} := range {iter}",
     dict_contains="dictContains({d}, {k})",
     tuple_type="struct {{ a {T}; b {T} }}",
     tuple_get="{t}.{field}",
@@ -157,8 +169,13 @@ class GoEmitter(Emitter):
             self.lines.append(f"{ind}    {var_a} := {it_a}[__i]; {var_b} := {it_b}[__i]")
         else:
             iter_s = self.expr(it)
-            self.var_types[var] = "long"
-            self.lines.append(f"{ind}for _, {var} := range {iter_s} {{")
+            if self.infer_type(it) == "dict":
+                # range over a map yields keys
+                self.var_types[var] = "str"
+                self.lines.append(f"{ind}for {var} := range {iter_s} {{")
+            else:
+                self.var_types[var] = "long"
+                self.lines.append(f"{ind}for _, {var} := range {iter_s} {{")
         self.indent_lvl += 1
         for s in node.body:
             self.stmt(s)
@@ -186,6 +203,10 @@ class GoEmitter(Emitter):
             name = node.target.id
             ann_type = self._ann_type(node.annotation)
             nt = self.py_to_native(ann_type)
+            if ann_type == "list" and node.value is not None:
+                elem = self._list_elem_of_value(node.value)
+                if elem and elem != self.spec.list_elem_type:
+                    nt = self.spec.list_type.format(T=elem)
             if node.value is not None:
                 val = self.expr(node.value)
                 self.lines.append(f"{self.spec.indent * self.indent_lvl}var {name} {nt} = {val}")
@@ -211,7 +232,8 @@ class GoEmitter(Emitter):
     def _ann_type(self, node: ast.AST) -> str:
         if isinstance(node, ast.Name):
             t = node.id
-            if t in ("int", "float", "bool", "str", "list", "dict", "tuple"):
+            if t in ("int", "float", "bool", "str", "list", "dict",
+                     "tuple", "set"):
                 return t
             if t in self.class_names:
                 return t
@@ -276,6 +298,11 @@ def emit_go(units: list[FuncUnit], entry: str | None,
     extern_fns: functions from other backends that this Go code calls.
     """
     emitter = GoEmitter(SPEC)
+    emitter.func_signatures = {
+        u.name: ([p for p, _t in u.params],
+                 dict(getattr(u, 'param_defaults', {})))
+        for u in units
+    }
     emitter.library_mode = library_mode
     emitter.constants = constants or {}
     emitted: dict[str, str] = {}
@@ -294,6 +321,7 @@ def emit_go(units: list[FuncUnit], entry: str | None,
         "package main\n\n"
         'import "fmt"\n'
         'import "strings"\n'
+        'import "strconv"\n'
         'import "sort"\n'
         'import "os"\n'
         'import "math"\n'
@@ -369,6 +397,10 @@ def emit_go(units: list[FuncUnit], entry: str | None,
         else:
             wrapper = f"func main() {{\n\t_ = {entry_u.name}()\n}}\n"
         fns.append(wrapper)
+    elif not fns:
+        # the entry function was rejected during emission; the pipeline
+        # already holds the reason, so return what we have
+        return prelude + "\n".join(fns), emitted
     else:
         # Go main() must have no arguments and no return values
         # Rename the user's main() to __ge_main() and add a wrapper

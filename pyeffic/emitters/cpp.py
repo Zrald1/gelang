@@ -12,6 +12,10 @@ SPEC = Spec(
     list_type="std::vector<{T}>",
     list_param_type="std::vector<int64_t>&",
     list_elem_type="int64_t",
+    str_split="geStrSplit({x}, {sep})",
+    str_join="geStrJoin({x}, {sep})",
+    list_slice="std::vector<int64_t>({x}.begin() + ({start}), {x}.begin() + ({stop}))",
+    list_copy="std::vector<int64_t>({x})",
     borrow_list_arg=False,
     range_call="for_range({lo}, {hi})",
     range_step_call="for_range({lo}, {hi}, {step})",
@@ -20,8 +24,9 @@ SPEC = Spec(
     print_int='std::cout << ({v}) << std::endl',
     print_float='std::cout << ({v}) << std::endl',
     print_str='std::cout << ({v}) << std::endl',
-    print_bool='std::cout << ({v}) << std::endl',
+    print_bool='std::cout << (({v}) ? "True" : "False") << std::endl',
     print_generic='std::cout << ({v}) << std::endl',
+    print_list='std::cout << geListStr({v}) << std::endl',
     int_cast="static_cast<int64_t>({x})",
     float_cast="static_cast<double>({x})",
     float_div="(static_cast<double>({l}) / static_cast<double>({r}))",
@@ -29,9 +34,13 @@ SPEC = Spec(
     sum_call="std::accumulate({it}.begin(), {it}.end(), 0LL)",
     abs_int="std::abs({x})",
     abs_float="std::fabs({x})",
+    min2_call="std::min({a}, {b})",
+    max2_call="std::max({a}, {b})",
     min_call="*std::min_element({it}.begin(), {it}.end())",
     max_call="*std::max_element({it}.begin(), {it}.end())",
     pow_call="std::pow({l}, {r})",
+    pow_int="static_cast<int64_t>(std::pow(static_cast<double>({l}), static_cast<double>({r})))",
+    pow_float="std::pow({l}, {r})",
     append_call="{x}.push_back({v})",
     index_call="{x}[{i}]",
     comment="//",
@@ -51,8 +60,10 @@ SPEC = Spec(
     struct_field_template="    {type} {name};",
     struct_new_template="{name} {name}_new({params}) {{\n{body}\n}}",
     dict_type="std::map<std::string, {V}>",
+    set_type="std::set<int64_t>",
     dict_get="{d}.at({k})",
     dict_set="{d}[{k}] = {v}",
+    dict_keys="geDictKeys({x})",
     dict_contains="({d}.find({k}) != {d}.end())",
     tuple_type="std::tuple<{T}, {T}>",
     tuple_get="std::get<{i}>({t})",
@@ -80,8 +91,13 @@ class CppEmitter(Emitter):
                 )
         else:
             iter_s = self.expr(it)
-            self.var_types[var] = "int"
-            self.lines.append(f"{ind}for (auto& {var} : {iter_s}) {{")
+            if self.infer_type(it) == "dict":
+                self.var_types[var] = "str"
+                self.lines.append(
+                    f"{ind}for (auto {var} : geDictKeys({iter_s})) {{")
+            else:
+                self.var_types[var] = "int"
+                self.lines.append(f"{ind}for (auto& {var} : {iter_s}) {{")
         self.indent_lvl += 1
         for s in node.body:
             self.stmt(s)
@@ -135,6 +151,11 @@ def emit_cpp(units: list[FuncUnit], entry: str | None,
              constants: dict | None = None,
              preamble: dict | None = None) -> tuple[str, dict[str, str]]:
     emitter = CppEmitter(SPEC)
+    emitter.func_signatures = {
+        u.name: ([p for p, _t in u.params],
+                 dict(getattr(u, 'param_defaults', {})))
+        for u in units
+    }
     emitter.library_mode = library_mode
     emitter.constants = constants or {}
     # in multi-backend mode, force extern "C" on all functions so Rust can link
@@ -160,6 +181,7 @@ def emit_cpp(units: list[FuncUnit], entry: str | None,
         "#include <cmath>\n"
         "#include <numeric>\n"
         "#include <algorithm>\n"
+        "#include <set>\n"
         "#include <string>\n\n"
         "using std::cout;\n"
         "using std::endl;\n\n"
