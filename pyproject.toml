@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gelang"
-version = "0.1.0"
+version = "0.1.2"
 description = "One typed source language, compiled to Rust, C++, C#, Zig, Go, or Kotlin — chosen per function. Generates Flutter and React UIs from one DSL."
 readme = "README.md"
 requires-python = ">=3.10"

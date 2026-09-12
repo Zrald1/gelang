@@ -1,7 +1,7 @@
 {
   "name": "gelang",
-  "version": "0.1.0",
-  "description": "One typed source language, compiled to Rust, C++, C#, Zig, Go, or Kotlin — chosen per function. Generates Flutter and React UIs from one DSL.",
+  "version": "0.1.2",
+  "description": "One typed source language, compiled to Rust, C++, C#, Zig, Go, or Kotlin \u2014 chosen per function. Generates Flutter and React UIs from one DSL.",
   "keywords": [
     "ge",
     "gelang",
