@@ -427,8 +427,96 @@ def _print_flutter(report) -> None:
         print(f"  ! {e}")
 
 
+def _ui_node_to_tree(node) -> dict:
+    """Convert a .ge.ui WidgetNode into the dict dartgen.generate_main wants."""
+    if node is None:
+        return {"kind": "Column", "children": [], "align": "center"}
+    d: dict = {"kind": node.kind}
+    if node.children:
+        d["children"] = [_ui_node_to_tree(c) for c in node.children]
+    child = node.props.get("child")
+    if child is not None and hasattr(child, "kind"):
+        d["child"] = _ui_node_to_tree(child)
+    if node.text is not None:
+        d["text"] = node.text
+    elif "text" in node.props:
+        d["text"] = node.props["text"]
+    if node.label is not None:
+        d["label"] = node.label
+    elif "label" in node.props:
+        d["label"] = node.props["label"]
+    if node.state:
+        d["state"] = node.state
+    style = node.props.get("style") or node.style_dict.get("style")
+    if style:
+        d["style"] = style
+    for key in ("align", "padding", "color", "hint"):
+        if key in node.props:
+            d[key] = node.props[key]
+    if node.action:
+        d["action"] = node.action
+    return d
+
+
+def _flutter_from_ui(args, ui_path: Path) -> int:
+    """`ge flutter foo.ge.ui` — generate a Flutter project from the UI DSL."""
+    from .ui_dsl import parse_ui_file
+    from .dartgen import generate_main, generate_pubspec
+    from .config import Config
+
+    try:
+        screen = parse_ui_file(ui_path)
+    except SyntaxError as e:
+        print(f"error: invalid .ge.ui — {e}", file=sys.stderr)
+        return 1
+
+    app_name = args.app_name or ui_path.stem
+    cfg = Config(out_dir=Path(args.out_dir), target="mobile")
+    project_dir = cfg.target_dir / app_name
+    lib_dir = project_dir / "lib"
+    lib_dir.mkdir(parents=True, exist_ok=True)
+
+    tree = _ui_node_to_tree(screen.root)
+    title = screen.title or app_name
+    main_dart = generate_main(tree, [], app_title=title)
+
+    (lib_dir / "main.dart").write_text(main_dart, encoding="utf-8")
+    # generate_main always imports bindings.dart; a UI-only project has no
+    # FFI exports, so emit the stub rather than leaving a dangling import.
+    from .dartgen import generate_bindings
+    (lib_dir / "bindings.dart").write_text(
+        generate_bindings([], app_name), encoding="utf-8")
+    (project_dir / "pubspec.yaml").write_text(
+        generate_pubspec(app_name), encoding="utf-8")
+
+    print(GE_BANNER)
+    print()
+    print(f"== GE flutter app: {project_dir} ==")
+    print(f"Title       : {title}")
+    print(f"Dart files  : {lib_dir / 'main.dart'}")
+    print(f"\nNext: cd {project_dir} && flutter pub get && flutter run")
+
+    dart = _find_dart()
+    if dart:
+        r = subprocess.run([dart, "analyze", str(lib_dir)],
+                           capture_output=True, text=True, timeout=120)
+        out = ((r.stdout or "") + (r.stderr or "")).strip()
+        print(out[:1200] if out else "(analyzer: no output)")
+        print("Dart analysis: " + ("PASS" if r.returncode == 0 else "issues found"))
+    else:
+        print("\n(dart not found — install Flutter to validate generated Dart)")
+    return 0
+
+
 def cmd_flutter(args) -> int:
-    source = _maybe_transpile_ts(Path(args.file))
+    src_path = Path(args.file)
+    # A .ge.ui file is a UI definition, not GE source. `ge flutter` used to
+    # hand it to the module resolver, which tried to parse `Window {` as
+    # Python and failed. Generate the Dart UI directly instead.
+    if src_path.suffix == ".ui":
+        return _flutter_from_ui(args, src_path)
+
+    source = _maybe_transpile_ts(src_path)
     # a Flutter app is a mobile artifact, so it always lands in build/mobile/
     cfg = Config(out_dir=Path(args.out_dir), target="mobile",
                  force_backend=None if args.backend == "auto" else args.backend,
@@ -518,12 +606,14 @@ def cmd_react(args) -> int:
         return 1
 
     app_name = args.app_name or ui_path.stem.replace(".ge", "")
-    # default: sibling web/frontend next to the ui/ directory
+    # Output goes under the target-aware build root so every artifact of a
+    # project lives in one place: build/web/frontend. An explicit -o wins.
     if args.out_dir:
         out_dir = Path(args.out_dir)
     else:
-        base = ui_path.parent.parent if ui_path.parent.name == "ui" else ui_path.parent
-        out_dir = base / "web" / "frontend"
+        from .config import Config
+        cfg = Config(target="web")
+        out_dir = cfg.target_dir / "frontend"
 
     files = generate_react_app(screen, app_name)
     written = write_react_app(files, out_dir, force=args.force)
