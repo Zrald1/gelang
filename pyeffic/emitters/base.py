@@ -1741,7 +1741,7 @@ class Emitter:
                     if self.spec.name == "rust":
                         return f"{base}.to_uppercase()"
                     if self.spec.name == "cpp":
-                        return f"/*str.upper()*/"
+                        return f"geStrUpper({base})"
                     if self.spec.name == "csharp":
                         return f"{base}.ToUpper()"
                     if self.spec.name == "go":
@@ -1752,6 +1752,8 @@ class Emitter:
                 if method == "lower":
                     if self.spec.name == "rust":
                         return f"{base}.to_lowercase()"
+                    if self.spec.name == "cpp":
+                        return f"geStrLower({base})"
                     if self.spec.name == "csharp":
                         return f"{base}.ToLower()"
                     if self.spec.name == "go":
@@ -1759,6 +1761,19 @@ class Emitter:
                     if self.spec.name == "kotlin":
                         return f"{base}.lowercase()"
                     return f"{base}.lower()"
+                if method == "replace" and len(node.args) == 2:
+                    a = self.expr(node.args[0])
+                    b = self.expr(node.args[1])
+                    if self.spec.name == "rust":
+                        return f"{base}.replace({a}.as_str(), {b}.as_str())"
+                    if self.spec.name == "cpp":
+                        return f"geStrReplace({base}, {a}, {b})"
+                    if self.spec.name == "csharp":
+                        return f"{base}.Replace({a}, {b})"
+                    if self.spec.name == "go":
+                        return f"strings.ReplaceAll({base}, {a}, {b})"
+                    if self.spec.name == "kotlin":
+                        return f"{base}.replace({a}, {b})"
                 if method == "strip":
                     if self.spec.name == "rust":
                         return f"{base}.trim().to_string()"

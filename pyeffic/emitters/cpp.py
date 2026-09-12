@@ -182,6 +182,7 @@ def emit_cpp(units: list[FuncUnit], entry: str | None,
         "#include <numeric>\n"
         "#include <algorithm>\n"
         "#include <set>\n"
+        "#include <cctype>\n"
         "#include <string>\n\n"
         "using std::cout;\n"
         "using std::endl;\n\n"

@@ -47,7 +47,9 @@ SPEC = Spec(
     fn_template="{sig} {{\n{body}\n}}",
     main_template="",
     ffi_prefix="#[no_mangle]\npub extern \"C\" ",
-    str_concat="{l} + &{r}",
+    # `String + &String` is not Add in Rust and `a + b` moves `a`, so a
+    # format! is used instead — always correct, and it accepts &str too.
+    str_concat="format!(\"{{}}{{}}\", {l}, {r})",
     str_len="{x}.len() as i64",
     str_index="{x}.as_bytes()[{i} as usize] as i64",
     str_slice="{x}[{start}..{end}].to_string()",
