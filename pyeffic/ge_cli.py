@@ -211,11 +211,27 @@ def cmd_analyze(args) -> int:
         return 1
 
     source = source_path.read_text(encoding="utf-8")
+    original_source = source
     entry = args.entry or "main"
+
+    # Lower non-Python flavours (.ge hybrid, .ge.ts) before analysis, exactly
+    # as build() does. Without this, `ge analyze` parses a hybrid file as
+    # plain Python and reports a syntax error on the first block tag.
+    # resolve_imports lowers internally, so it gets the original source.
+    from .frontends import frontend_for
+    from .frontends.typescript import TypeScriptSyntaxError
+    from .modules import _lower_source
+
+    if frontend_for(source_path) != "python":
+        try:
+            source = _lower_source(source, source_path)
+        except TypeScriptSyntaxError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 1
 
     # Resolve imports first
     try:
-        units, classes, warnings = resolve_imports(source, source_path)
+        units, classes, warnings = resolve_imports(original_source, source_path)
         for w in warnings:
             print(f"  warning: {w}")
     except Exception as e:
