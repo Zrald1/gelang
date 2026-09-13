@@ -32,6 +32,7 @@ SPEC = Spec(
     list_reverse="std.mem.reverse(i64, {x}.items)",
     print_list='gePrintList({v}.items)',
     int_cast="@as(i64, {x})",
+    int_cast_float="@as(i64, @intFromFloat({x}))",
     float_cast="@as(f64, {x})",
     float_div="(@as(f64, {l}) / @as(f64, {r}))",
     floor_div="@divFloor({l}, {r})",
@@ -55,7 +56,7 @@ SPEC = Spec(
     indent="    ",
     str_concat="{l} ++ {r}",
     str_len="{x}.len",
-    str_index="{x}[{i}]",
+    str_index="({x})[@as(usize, @intCast({i}))..][0..1]",
     str_slice="{x}[{start}..{end}]",
     str_slice_start="{x}[{start}..]",
     str_slice_end="{x}[..{end}]",
@@ -269,6 +270,11 @@ class ZigEmitter(Emitter):
         params = []
         for pname, ptype in unit.params:
             nt = self.param_native_type(ptype, pname)
+            # A parameter this function does not mutate is borrowed const, so
+            # the caller may keep its own binding `const`.
+            if (ptype == "list" and nt.startswith("*std.ArrayList")
+                    and pname not in self.mutated_list_params):
+                nt = "*const " + nt[1:]
             params.append(f"{pname}: {nt}")
         ret = self.py_to_native(unit.ret_type) if unit.ret_type != "None" else "void"
         param_str = ", ".join(params)

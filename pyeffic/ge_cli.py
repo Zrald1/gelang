@@ -238,8 +238,12 @@ def cmd_analyze(args) -> int:
         print(f"  Import resolution error: {e}")
         units, classes, warnings = [], [], []
 
-    # Run type checker
-    reporter = check_source(source, file=str(source_path), entry=entry)
+    # Run type checker. The resolved units are passed in so that functions
+    # brought in by an import are known — otherwise every call across a module
+    # boundary is reported as GE007 "called but not defined".
+    reporter = check_source(source, file=str(source_path), entry=entry,
+                            units=units or None,
+                            classes=classes or None)
 
     # Print diagnostics
     errors = [d for d in reporter.diagnostics if d.severity == "error"]

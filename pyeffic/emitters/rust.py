@@ -24,7 +24,9 @@ SPEC = Spec(
     borrow_list_arg=True,
     range_call="({lo}..{hi})",
     range_step_call="({lo}..{hi}).step_by({step} as usize)",
-    len_call="{x}.len() as i64",
+    # parenthesised: an unparenthesised cast makes `x.len() as i64 < 2`
+    # parse as a generic argument list, not a comparison
+    len_call="({x}.len() as i64)",
     list_len="{x}.len() as i64",
     print_int='println!("{{}}", {v})',
     print_float='println!("{{}}", {v})',
@@ -55,11 +57,12 @@ SPEC = Spec(
     # `String + &String` is not Add in Rust and `a + b` moves `a`, so a
     # format! is used instead — always correct, and it accepts &str too.
     str_concat="format!(\"{{}}{{}}\", {l}, {r})",
-    str_len="{x}.len() as i64",
-    str_index="{x}.as_bytes()[{i} as usize] as i64",
-    str_slice="{x}[{start}..{end}].to_string()",
-    str_slice_start="{x}[{start}..].to_string()",
-    str_slice_end="{x}[..{end}].to_string()",
+    str_len="({x}.len() as i64)",
+    str_index="{x}[({i}) as usize..].chars().next().unwrap_or(' ').to_string()",
+    # ranges must be usize, and slicing a String needs a panic-free bound
+    str_slice="{x}[({start}) as usize..({end}) as usize].to_string()",
+    str_slice_start="{x}[({start}) as usize..].to_string()",
+    str_slice_end="{x}[..({end}) as usize].to_string()",
     list_concat="{{ let mut t = {l}; t.extend({r}.iter()); t }}",
     condition_parens=False,
     # .cloned() so the loop variable is owned: iterating a &[i64]

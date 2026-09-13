@@ -72,9 +72,9 @@ def generate_bindings(ffi_units: list[FuncUnit], lib_basename: str,
     if multi:
         # multi-backend: one DynamicLibrary per backend
         for b in sorted(backends_used):
-            lines.append(f"  late final DynamicLibrary _lib_{b};")
+            lines.append(f"  // ignore: unused_field\n  late final DynamicLibrary _lib_{b};")
     else:
-        lines.append("  late final DynamicLibrary _lib;")
+        lines.append("  // ignore: unused_field\n  late final DynamicLibrary _lib;")
 
     for u in ffi_units:
         lines.append(f"  late final {dart_name(u.name)}Dart {dart_name(u.name)};")
@@ -306,6 +306,7 @@ class HomePage extends StatefulWidget {{
 }}
 
 class _HomePageState extends State<HomePage> {{
+  // ignore: unused_field — the UI-only path has no native exports yet
   final NativeLib _lib = NativeLib();
 
 {state_decls}
@@ -353,7 +354,7 @@ class GeTagged extends StatelessWidget {{
         }},
         child: Container(
           decoration: BoxDecoration(
-            border: Border.all(color: Colors.blue.withOpacity(0.3), width: 1),
+            border: Border.all(color: Colors.blue.withValues(alpha: 0.3), width: 1),
           ),
           child: child,
         ),

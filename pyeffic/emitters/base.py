@@ -51,6 +51,9 @@ class Spec:
     # Type-aware exponentiation. Integer `**` and float `**` need different
     # target syntax in most languages; when these are empty the emitter falls
     # back to pow_call.
+    # Converting a float to int needs a different spelling on some
+    # targets (Zig rejects @as(i64, 3.9)); empty falls back to int_cast.
+    int_cast_float: str = ""
     pow_int: str = ""
     pow_float: str = ""
     # two-argument min(a, b) / max(a, b). Most targets have no plain
@@ -164,6 +167,9 @@ class Emitter:
         # reset unsupported tracking for this function
         self.unsupported_emissions = []
         self.current_func = unit.name
+        # declared return type, so a borrowed &str can be converted back to an
+        # owned String on the way out (Rust idiom: borrow in, own out)
+        self.current_ret_type = unit.ret_type
         # load container element types for this function's params
         self.param_elem_types = getattr(unit, 'param_elem_types', {})
         self.param_dict_types = getattr(unit, 'param_dict_types', {})
@@ -268,6 +274,9 @@ class Emitter:
             return self.spec.dict_type.format(V=self.spec.list_elem_type)
         if t == "tuple":
             return self.spec.tuple_type.format(T=self.spec.list_elem_type)
+        if t == "str" and self.spec.name == "rust":
+            # borrowed: an owned String parameter would be moved on first use
+            return "&str"
         if t == "set":
             if self.spec.set_type:
                 if self.spec.name == "cpp":
@@ -330,6 +339,14 @@ class Emitter:
                         and node.value.id in self.mutated_params
                         and self.var_types.get(node.value.id) == "list"):
                     self.lines.append(f"{ind}return (*{node.value.id}).clone();")
+                elif (self.spec.name == "rust"
+                        and self.current_ret_type == "str"
+                        and isinstance(node.value, ast.Name)
+                        and node.value.id in self.params):
+                    # str parameters are borrowed &str, but a str-returning
+                    # function must hand back an owned String
+                    self.lines.append(
+                        f"{ind}return {self.expr(node.value)}.to_string();")
                 else:
                     self.lines.append(f"{ind}return {self.expr(node.value)};")
         elif isinstance(node, ast.Assign):
@@ -1114,7 +1131,8 @@ class Emitter:
                         elif self.spec.name == "go":
                             contains = f"contains({right}, {cur})"
                         elif self.spec.name == "kotlin":
-                            contains = f"{right}.contains({cur})"
+                            # contains() takes a Pattern, not a String
+                            contains = f"{right}.contains({cur}.as_str())"
                         else:
                             contains = f"/*contains*/"
                         if isinstance(op, ast.NotIn):
@@ -1124,7 +1142,8 @@ class Emitter:
                     else:
                         # string contains
                         if self.spec.name == "rust":
-                            contains = f"{right}.contains({cur})"
+                            # contains() takes a Pattern, not a String
+                            contains = f"{right}.contains({cur}.as_str())"
                         elif self.spec.name == "cpp":
                             contains = f"({right}.find({cur}) != std::string::npos)"
                         elif self.spec.name == "csharp":
@@ -1143,7 +1162,17 @@ class Emitter:
                 else:
                     sym = self.cmp_symbol(op)
                     right = self.expr(comp)
-                    parts.append(f"({cur} {sym} {right})")
+                    right_type = self.infer_type(comp)
+                    # Zig cannot compare slices with ==; string equality goes
+                    # through std.mem.eql.
+                    if (self.spec.name == "zig"
+                            and (left_type == "str" or right_type == "str")
+                            and isinstance(op, (ast.Eq, ast.NotEq))):
+                        eql = f"std.mem.eql(u8, {cur}, {right})"
+                        parts.append(f"(!{eql})" if isinstance(op, ast.NotEq)
+                                     else eql)
+                    else:
+                        parts.append(f"({cur} {sym} {right})")
                     cur = right
             return "(" + " && ".join(parts) + ")"
         if isinstance(node, ast.IfExp):
@@ -1423,7 +1452,11 @@ class Emitter:
         if fname == "pow":
             return self.spec.pow_call.format(l=self.expr(node.args[0]), r=self.expr(node.args[1]))
         if fname == "int":
-            return f"({self.spec.int_cast.format(x=self.expr(node.args[0]))})"
+            arg = node.args[0]
+            # Zig rejects @as(i64, 3.9); a float argument needs its own form
+            if self.infer_type(arg) == "float" and self.spec.int_cast_float:
+                return f"({self.spec.int_cast_float.format(x=self.expr(arg))})"
+            return f"({self.spec.int_cast.format(x=self.expr(arg))})"
         if fname == "float":
             return f"({self.spec.float_cast.format(x=self.expr(node.args[0]))})"
         if fname == "str":
@@ -1940,6 +1973,16 @@ class Emitter:
             return s
         t = self.infer_type(node)
         if t == "list":
+            return "&" + s
+        if t == "str" and self.spec.name == "rust":
+            # a str param is &str; a String local or literal must be borrowed
+            if isinstance(node, ast.Name) and node.id in self.params:
+                return s          # already a &str parameter
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                # a literal is already &'static str; emitting String::from
+                # here would need an extra borrow and an allocation
+                return '"' + node.value.replace("\\", "\\\\").replace(
+                    '"', '\\"').replace("\n", "\\n") + '"'
             return "&" + s
         return s
 
@@ -2518,7 +2561,22 @@ class Emitter:
             if isinstance(node.value, str):
                 return "str"
         if isinstance(node, ast.Name):
-            return self.var_types.get(node.id, "int")
+            if node.id in self.var_types:
+                return self.var_types[node.id]
+            # module-level constants are inlined, not declared, so their type
+            # has to be recovered from the collected value — otherwise
+            # `GREETING + NAME` is treated as integer addition
+            if node.id in self.constants:
+                v = self.constants[node.id]
+                if isinstance(v, bool):
+                    return "bool"
+                if isinstance(v, int):
+                    return "int"
+                if isinstance(v, float):
+                    return "float"
+                if isinstance(v, str):
+                    return "str"
+            return "int"
         if isinstance(node, ast.BinOp):
             lt = self.infer_type(node.left)
             rt = self.infer_type(node.right)
@@ -2548,7 +2606,8 @@ class Emitter:
                 # slicing a string returns a string, slicing a list returns a list
                 return base_type if base_type in ("str", "list") else "list"
             if base_type == "str":
-                return "int"  # character access returns an integer (char code)
+                # Python's s[i] is a one-character string, not a code point
+                return "str"
             if base_type == "dict":
                 return "int"  # dict values are integers
             if base_type == "tuple":

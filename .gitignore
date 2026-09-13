@@ -48,6 +48,10 @@ desktop.ini
 tools/*
 !tools/README.md
 
+# ---- experiment projects (not shipped) ----
+# Built with the published npm package to exercise the compiler.
+examples/
+
 # ---- project scratch ----
 _test_*.py
 _fix_*.py

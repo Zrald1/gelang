@@ -125,6 +125,16 @@ class Ctx:
         return run.stdout, r
 
 
+def _is_local_cli(cli: list[str]) -> bool:
+    """True when the CLI under test is the source tree, not an install.
+
+    The api/ and tests/golden/ corpora are repository artefacts and are not
+    shipped in the npm package, so cases that read them only apply locally.
+    """
+    joined = " ".join(cli)
+    return "pyeffic.ge_cli" in joined or "pyeffic/ge_cli" in joined
+
+
 def _spawnable(cmd: list[str]) -> list[str]:
     """Resolve a Windows .cmd/.bat shim to something subprocess can execute.
 

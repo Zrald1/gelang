@@ -4,6 +4,44 @@ All notable changes to GE. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] — 2026-09-13
+
+Found while building a real application (a Flutter AI keyboard with a Rust
+memory layer and a C# core) against the published package.
+
+### Fixed
+
+- **Rust string parameters moved on first use.** `fn f(text: str)` emitted
+  `text: String`, so a parameter used twice failed with E0382. Parameters are
+  now `&str` and call sites borrow, which is the documented Rust idiom
+  ("prefer the borrowed type over borrowing the owned type"); a `str`
+  returning function converts back to an owned `String` on the way out.
+- **`s[i]` returned a code point, not a character.** Python's `s[i]` is a
+  one-character *string*, so `if s[0] == "a"` compared an integer with a
+  string and failed to compile on every backend.
+- **Zig could not compare strings.** `a == b` on two `[]const u8` is invalid;
+  equality now goes through `std.mem.eql`.
+- **`if len(s) < n` produced invalid Rust.** An unparenthesised cast made
+  `x.len() as i64 < 2` parse as a generic argument list.
+- **Rust string slicing and `contains`** needed `usize` ranges and `&str`
+  patterns respectively.
+- **Zig `int(3.9)`** was rejected (`@as(i64, 3.9)` cannot coerce); it now
+  uses `@intFromFloat`.
+- **Zig read-only list parameters** were `*std.ArrayList`, which forced the
+  caller to declare the list `var`. They are now `*const std.ArrayList`.
+- **Module-level string constants** were typed as integers, so `A + B` on two
+  string constants emitted integer addition.
+- **`ge analyze` did not know about imports.** Every call across a module
+  boundary was reported as `GE007 called but not defined`; the resolved units
+  are now passed to the type checker.
+- **Generated Flutter** had three analyzer warnings: an unused FFI handle and
+  a deprecated `withOpacity`. `flutter analyze` now reports no issues.
+
+### Changed
+
+- `examples/` is gitignored. It holds experiment projects built against the
+  published package to exercise the compiler, not part of the release.
+
 ## [Unreleased]
 
 ### Added
