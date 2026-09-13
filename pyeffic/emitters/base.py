@@ -63,6 +63,12 @@ class Spec:
     # str.split(sep) / sep.join(list). Empty means unsupported.
     str_split: str = ""
     str_join: str = ""
+    # str.upper() / str.lower(). Empty falls back to the per-backend
+    # branch in the dispatcher.
+    str_upper: str = ""
+    str_lower: str = ""
+    # str.replace(a, b). Empty falls back to the generic method call.
+    str_replace: str = ""
     # in-place list.sort() / list.reverse()
     list_sort: str = ""
     list_reverse: str = ""
@@ -103,6 +109,8 @@ class Spec:
     # tuple support
     tuple_type: str = "std::tuple<{T}>"
     set_type: str = ""  # native set type
+    set_len: str = ""  # len(set)
+    dict_len: str = ""  # len(dict)
     tuple_get: str = "std::get<{i}>({t})"
     # list length (separate from len_call which may be used for strings)
     list_len: str = "{x}.size()"
@@ -233,6 +241,10 @@ class Emitter:
                 elem_t = self._native_elem_type(self.param_elem_types[pname])
                 if self.spec.name == "rust":
                     return f"&[{elem_t}]"
+                if self.spec.name == "zig":
+                    # a list parameter is always a pointer to the caller's
+                    # ArrayList so mutation is visible to it
+                    return f"*std.ArrayList({elem_t})"
                 return self.spec.list_type.format(T=elem_t)
             return self.spec.list_param_type
         if t == "dict":
@@ -1219,7 +1231,10 @@ class Emitter:
             if self.spec.name == "kotlin":
                 return f"mutableListOf({elems})"
             if self.spec.name == "zig":
-                return f"&[_]i64{{ {elems} }}"
+                # Zig lists are growable ArrayLists; build one from the literal
+                if not node.elts:
+                    return f"geListNew({elem})"
+                return f"geListFrom({elem}, &[_]{elem}{{ {elems} }})"
             if self.spec.name == "csharp":
                 lt = self.spec.list_type.format(T=elem)
                 return f"new {lt}{{{elems}}}"
@@ -1250,11 +1265,20 @@ class Emitter:
                                  for k, v in zip(node.keys, node.values))
                 return f"hashMapOf({pairs})"
             if self.spec.name == "zig":
-                # Zig doesn't have map literals — emit a block expression
-                # that creates and populates the map
-                puts = "\n".join(f"        m.put({self.expr(k)}, {self.expr(v)}) catch unreachable;"
-                                for k, v in zip(node.keys, node.values))
-                return f"blk: {{\n        var m = std.StringHashMap({self.spec.list_elem_type}).init(std.heap.page_allocator);\n{puts}\n        break :blk m;\n    }}"
+                # Zig has no map literal; build one with the arena allocator.
+                # An empty literal needs no block at all, and a block whose
+                # local is never mutated is rejected by Zig.
+                if not node.keys:
+                    return (f"std.StringHashMap({self.spec.list_elem_type})"
+                            f".init(ge_alloc)")
+                puts = "\n".join(
+                    f"    __m.put({self.expr(k)}, {self.expr(v)}) catch unreachable;"
+                    for k, v in zip(node.keys, node.values))
+                return (f"blk: {{\n"
+                        f"    var __m = std.StringHashMap({self.spec.list_elem_type}).init(ge_alloc);\n"
+                        f"{puts}\n"
+                        f"    break :blk __m;\n"
+                        f"}}")
             return f"{{{pairs}}}"
         if isinstance(node, ast.Set):
             elems = ", ".join(self.expr(e) for e in node.elts)
@@ -1280,8 +1304,16 @@ class Emitter:
             if self.spec.name == "kotlin":
                 return f"hashSetOf({elems})"
             if self.spec.name == "zig":
-                # no allocator-backed set in the Zig runtime
-                return self._mark_unsupported("set literal (Zig)")
+                # Zig has no set type; GE uses AutoHashMap(elem, void) over
+                # the arena allocator
+                if not node.elts:
+                    return "geSetNew(i64)"
+                seen: list[str] = []
+                for e in node.elts:
+                    rendered = self.expr(e)
+                    if rendered not in seen:
+                        seen.append(rendered)
+                return f"geSetFrom(i64, &[_]i64{{ {', '.join(seen)} }})" 
             return f"std::set<int64_t>{{{elems}}}"
         if isinstance(node, ast.SetComp):
             return self._set_comp(node)
@@ -1365,6 +1397,10 @@ class Emitter:
                 return self.spec.str_len.format(x=self.expr(arg))
             if t == "list":
                 return self.spec.list_len.format(x=self.expr(arg))
+            if t == "set" and self.spec.set_len:
+                return self.spec.set_len.format(x=self.expr(arg))
+            if t == "dict" and self.spec.dict_len:
+                return self.spec.dict_len.format(x=self.expr(arg))
             return self.spec.len_call.format(x=self.expr(arg))
         if fname == "abs":
             t = self.infer_type(node.args[0])
@@ -1741,6 +1777,8 @@ class Emitter:
             if base_type == "str" or (isinstance(node.func.value, ast.Constant) and isinstance(node.func.value.value, str)):
                 method = node.func.attr
                 if method == "upper":
+                    if self.spec.str_upper:
+                        return self.spec.str_upper.format(x=base)
                     if self.spec.name == "rust":
                         return f"{base}.to_uppercase()"
                     if self.spec.name == "cpp":
@@ -1753,6 +1791,8 @@ class Emitter:
                         return f"{base}.uppercase()"
                     return f"{base}.upper()"
                 if method == "lower":
+                    if self.spec.str_lower:
+                        return self.spec.str_lower.format(x=base)
                     if self.spec.name == "rust":
                         return f"{base}.to_lowercase()"
                     if self.spec.name == "cpp":
@@ -1767,10 +1807,10 @@ class Emitter:
                 if method == "replace" and len(node.args) == 2:
                     a = self.expr(node.args[0])
                     b = self.expr(node.args[1])
+                    if self.spec.str_replace:
+                        return self.spec.str_replace.format(x=base, a=a, b=b)
                     if self.spec.name == "rust":
                         return f"{base}.replace({a}.as_str(), {b}.as_str())"
-                    if self.spec.name == "cpp":
-                        return f"geStrReplace({base}, {a}, {b})"
                     if self.spec.name == "csharp":
                         return f"{base}.Replace({a}, {b})"
                     if self.spec.name == "go":
@@ -1817,6 +1857,20 @@ class Emitter:
                     else:
                         args.append(f"&mut {self.expr(a)}")
                     continue
+            if self.spec.name == "zig" and self.infer_type(a) == "list":
+                # Zig list params are *std.ArrayList, so the caller passes a
+                # pointer to its own list (mutations must be visible).
+                if isinstance(a, ast.Name):
+                    args.append(f"&{self.expr(a)}")
+                else:
+                    # a literal or call result is an rvalue and cannot be
+                    # addressed; bind it to a temporary first
+                    tmp = f"__ge_arg{i}_{len(self.lines)}"
+                    self.lines.append(
+                        f"{self.spec.indent * self.indent_lvl}"
+                        f"var {tmp} = {self.expr(a)};")
+                    args.append(f"&{tmp}")
+                continue
             args.append(self._arg(a))
         # handle keyword arguments: map to positional by reordering
         # (native languages don't support keyword args, so we just append them)
@@ -2168,11 +2222,17 @@ class Emitter:
                     f"for _, {var} := range {iter_src} {{ __v = append(__v, int64({elem})) }}; "
                     f"return __v; }}()")
         if self.spec.name == "zig":
+            # build an ArrayList (the GE list type), not a slice
+            et = self.spec.list_elem_type
             if lo is not None:
-                return (f"blk: {{ var __v = std.ArrayList({self.spec.list_elem_type}).init(std.heap.page_allocator); "
-                        f"var {var}: i64 = {lo}; while ({var} < {hi}) : ({var} += 1) {{ __v.append({elem}) catch unreachable; }} "
-                        f"break :blk __v.toOwnedSlice() catch unreachable; }}")
-            return self._mark_unsupported('for-in comprehension in Zig')
+                return (f"blk: {{ var __v = geListNew({et}); "
+                        f"var {var}: i64 = {lo}; while ({var} < {hi}) : ({var} += 1) {{ "
+                        f"__v.append(@as({et}, @intCast({elem}))) catch unreachable; }} "
+                        f"break :blk __v; }}")
+            return (f"blk: {{ var __v = geListNew({et}); "
+                    f"for ({iter_src}.items) |{var}| {{ "
+                    f"__v.append(@as({et}, @intCast({elem}))) catch unreachable; }} "
+                    f"break :blk __v; }}")
         if self.spec.name == "kotlin":
             if lo is not None:
                 return (f"run {{ val __v = mutableListOf<Long>(); "
@@ -2540,6 +2600,17 @@ class Emitter:
                 key = f"{node.func.value.id}.{node.func.attr}"
                 if key in self.func_return_types:
                     return self.func_return_types[key]
+            # str methods that return a string. Without this, print() falls
+            # back to the generic format and a Zig []const u8 renders as a
+            # byte array.
+            if (isinstance(node.func, ast.Attribute)
+                    and self.infer_type(node.func.value) == "str"
+                    and node.func.attr in ("upper", "lower", "strip", "replace",
+                                           "join", "title", "capitalize")):
+                return "str"
+            if (isinstance(node.func, ast.Attribute)
+                    and node.func.attr in ("split", "splitlines")):
+                return "list"
         if isinstance(node, ast.Set):
             return "set"
         if isinstance(node, ast.SetComp):
