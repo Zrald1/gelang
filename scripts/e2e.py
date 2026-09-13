@@ -81,7 +81,7 @@ class Ctx:
             timeout: int = 300) -> subprocess.CompletedProcess:
         cmd = [*self.cli, *args]
         return subprocess.run(
-            cmd, cwd=str(cwd or self.workdir), capture_output=True,
+            _spawnable(cmd), cwd=str(cwd or self.workdir), capture_output=True,
             text=True, timeout=timeout, encoding="utf-8", errors="replace")
 
     def write(self, relpath: str, content: str) -> Path:
@@ -125,8 +125,25 @@ class Ctx:
         return run.stdout, r
 
 
+def _spawnable(cmd: list[str]) -> list[str]:
+    """Resolve a Windows .cmd/.bat shim to something subprocess can execute.
+
+    `npx`, `npm` and friends are batch files on Windows; CreateProcess cannot
+    run them directly, and Node 20.12+ refuses to spawn a .cmd without a
+    shell. The interpreter is invoked explicitly instead of using shell=True,
+    which would re-parse the arguments.
+    """
+    if os.name != "nt" or not cmd:
+        return cmd
+    exe = shutil.which(cmd[0])
+    if not exe:
+        return cmd
+    if exe.lower().endswith((".cmd", ".bat")):
+        return [os.environ.get("COMSPEC", "cmd.exe"), "/c", exe, *cmd[1:]]
+    return [exe, *cmd[1:]]
+
+
 def find_exe(root: Path) -> Path | None:
-    """Locate the binary a build produced, wherever the backend put it."""
     if not root.exists():
         return None
     for pat in ("**/bin/*.exe", "**/bin/*", "**/publish/*.exe",
@@ -204,6 +221,8 @@ def t_tools_check(ctx: Ctx) -> str:
 
 @case("api-check", "cli")
 def t_api_check(ctx: Ctx) -> str:
+    if not _is_local_cli(ctx.cli):
+        return "skipped: api/ ships with the source repo, not the npm package"
     r = ctx.run(["api-check"], cwd=REPO)
     assert r.returncode == 0, (r.stdout + r.stderr)[:500]
     return "surface matches"
@@ -211,6 +230,8 @@ def t_api_check(ctx: Ctx) -> str:
 
 @case("golden-check", "cli")
 def t_golden_check(ctx: Ctx) -> str:
+    if not _is_local_cli(ctx.cli):
+        return "skipped: tests/golden ships with the source repo"
     r = ctx.run(["golden", "--check", "--no-behaviour"], cwd=REPO)
     assert r.returncode == 0, (r.stdout + r.stderr)[:500]
     return "goldens match"
@@ -1557,7 +1578,7 @@ def t_golden_drift(ctx: Ctx) -> str:
 def detect_backends(cli: list[str], workdir: Path) -> set[str]:
     import json
     try:
-        r = subprocess.run([*cli, "doctor", "--json"], capture_output=True,
+        r = subprocess.run(_spawnable([*cli, "doctor", "--json"]), capture_output=True,
                            text=True, timeout=180, cwd=str(workdir),
                            encoding="utf-8", errors="replace")
         d = json.loads(r.stdout)

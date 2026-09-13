@@ -53,7 +53,7 @@ All notable changes to GE. Format follows
   single-flavour files; `.ts.ge.py` is accepted as a legacy alias.
 - Build root defaults to `build/` (was `ge_build/`).
 - Package name on npm is `gelang`.
-## [0.1.5] — 2026-09-13
+## [0.1.6] — 2026-09-13
 
 ### Zig is now a full backend
 
