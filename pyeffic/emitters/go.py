@@ -36,7 +36,9 @@ SPEC = Spec(
     print_bool='fmt.Println(geBoolStr({v}))',
     print_generic='fmt.Println({v})',
     print_list='fmt.Println(geListStr({v}))',
-    int_cast="int64({x})",
+    # Go rejects int64(3.9) for an untyped constant; math.Trunc works
+    # for both constants and variables and matches Python int().
+    int_cast="int64(math.Trunc({x}))",
     float_cast="float64({x})",
     float_div="(float64({l}) / float64({r}))",
     floor_div="({l} / {r})",

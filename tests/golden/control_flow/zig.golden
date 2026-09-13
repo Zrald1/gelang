@@ -30,17 +30,125 @@ fn ge_append_file(path: []const u8, content: []const u8) bool {
 }
 
 
-// GE Math runtime (Zig)
-fn gePrintList(v: []const i64) void {
+// GE runtime (Zig)
+//
+// GE lists are growable, so they need an allocator. A generated program
+// runs start-to-finish, so a single arena is the right fit: it amortises
+// the page-grain cost across many small lists and everything is released
+// in one call. (std.heap.page_allocator alone would issue a syscall per
+// allocation, and GeneralPurposeAllocator is a debugging allocator.)
+var ge_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+const ge_alloc = ge_arena.allocator();
+
+fn geListNew(comptime T: type) std.ArrayList(T) {
+    return std.ArrayList(T).init(ge_alloc);
+}
+
+fn geListFrom(comptime T: type, items: []const T) std.ArrayList(T) {
+    var l = std.ArrayList(T).init(ge_alloc);
+    l.appendSlice(items) catch unreachable;
+    return l;
+}
+
+fn geListCopy(comptime T: type, src: []const T) std.ArrayList(T) {
+    return geListFrom(T, src);
+}
+
+fn geListSlice(comptime T: type, src: []const T, lo: usize, hi: usize) std.ArrayList(T) {
+    var l = std.ArrayList(T).init(ge_alloc);
+    l.appendSlice(src[lo..hi]) catch unreachable;
+    return l;
+}
+
+fn geListConcat(comptime T: type, a: []const T, b: []const T) std.ArrayList(T) {
+    var l = std.ArrayList(T).init(ge_alloc);
+    l.appendSlice(a) catch unreachable;
+    l.appendSlice(b) catch unreachable;
+    return l;
+}
+
+// Python renders a sequence as [1, 2, 3] and quotes strings with '.
+fn gePrintList(v: anytype) void {
     const w = std.io.getStdOut().writer();
     w.print("[", .{}) catch unreachable;
     for (v, 0..) |x, i| {
         if (i > 0) w.print(", ", .{}) catch unreachable;
-        w.print("{d}", .{x}) catch unreachable;
+        switch (@typeInfo(@TypeOf(x))) {
+            .pointer => w.print("'{s}'", .{x}) catch unreachable,
+            .float => w.print("{d}", .{x}) catch unreachable,
+            .bool => w.print("{s}", .{if (x) "True" else "False"}) catch unreachable,
+            else => w.print("{d}", .{x}) catch unreachable,
+        }
     }
     w.print("]\n", .{}) catch unreachable;
 }
 
+fn geSetNew(comptime T: type) std.AutoHashMap(T, void) {
+    return std.AutoHashMap(T, void).init(ge_alloc);
+}
+
+fn geSetFrom(comptime T: type, items: []const T) std.AutoHashMap(T, void) {
+    var s = std.AutoHashMap(T, void).init(ge_alloc);
+    for (items) |x| s.put(x, {{}}) catch unreachable;
+    return s;
+}
+fn geStrSplit(s: []const u8, sep: []const u8) std.ArrayList([]const u8) {
+    var l = std.ArrayList([]const u8).init(ge_alloc);
+    if (sep.len == 0) {
+        l.append(s) catch unreachable;
+        return l;
+    }
+    var it = std.mem.splitSequence(u8, s, sep);
+    while (it.next()) |part| l.append(part) catch unreachable;
+    return l;
+}
+
+fn geStrJoin(parts: []const []const u8, sep: []const u8) []const u8 {
+    var total: usize = 0;
+    for (parts, 0..) |p, i| {
+        total += p.len;
+        if (i > 0) total += sep.len;
+    }
+    const buf = ge_alloc.alloc(u8, total) catch unreachable;
+    var pos: usize = 0;
+    for (parts, 0..) |p, i| {
+        if (i > 0) {
+            @memcpy(buf[pos..][0..sep.len], sep);
+            pos += sep.len;
+        }
+        @memcpy(buf[pos..][0..p.len], p);
+        pos += p.len;
+    }
+    return buf;
+}
+
+fn geStrReplace(s: []const u8, from: []const u8, to: []const u8) []const u8 {
+    if (from.len == 0) return s;
+    var out = std.ArrayList(u8).init(ge_alloc);
+    var i: usize = 0;
+    while (i < s.len) {
+        if (i + from.len <= s.len and std.mem.eql(u8, s[i..][0..from.len], from)) {
+            out.appendSlice(to) catch unreachable;
+            i += from.len;
+        } else {
+            out.append(s[i]) catch unreachable;
+            i += 1;
+        }
+    }
+    return out.items;
+}
+
+fn geStrUpper(s: []const u8) []const u8 {
+    const buf = ge_alloc.alloc(u8, s.len) catch unreachable;
+    for (s, 0..) |c, i| buf[i] = std.ascii.toUpper(c);
+    return buf;
+}
+
+fn geStrLower(s: []const u8) []const u8 {
+    const buf = ge_alloc.alloc(u8, s.len) catch unreachable;
+    for (s, 0..) |c, i| buf[i] = std.ascii.toLower(c);
+    return buf;
+}
 fn ge_sqrt(x: f64) f64 { return @sqrt(x); }
 fn ge_floor(x: f64) f64 { return @floor(x); }
 fn ge_ceil(x: f64) f64 { return @ceil(x); }
@@ -71,9 +179,14 @@ fn sum_to(n: i64) i64 {
     }
     return total;
 }
-pub fn main() void {
+fn __ge_main() void {
     std.io.getStdOut().writer().print("{d}\n", .{classify(7)}) catch unreachable;
     std.io.getStdOut().writer().print("{d}\n", .{classify((-7))}) catch unreachable;
     std.io.getStdOut().writer().print("{d}\n", .{classify(0)}) catch unreachable;
     std.io.getStdOut().writer().print("{d}\n", .{sum_to(10)}) catch unreachable;
 }
+pub fn main() void {
+    defer _ = ge_arena.deinit();
+    __ge_main();
+}
+

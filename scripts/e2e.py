@@ -1566,6 +1566,17 @@ def detect_backends(cli: list[str], workdir: Path) -> set[str]:
         return set()
 
 
+def _safe(text: str) -> str:
+    """Make text printable on any console.
+
+    Compiler diagnostics contain characters the Windows console codec cannot
+    encode (curly quotes, box drawing), which would otherwise abort the whole
+    run with UnicodeEncodeError while printing a failure.
+    """
+    enc = sys.stdout.encoding or "utf-8"
+    return str(text).encode(enc, errors="replace").decode(enc, errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1636,7 +1647,7 @@ def main(argv: list[str] | None = None) -> int:
             for res in ex.map(run_one, selected):
                 results.append(res)
                 mark = {PASS: "ok  ", FAIL: "FAIL", SKIP: "skip"}[res.status]
-                line = f"  {mark} {res.case:<28} {res.detail[:70]}"
+                line = _safe(f"  {mark} {res.case:<28} {res.detail[:70]}")
                 print(line, flush=True)
 
         failed = [r for r in results if r.status == FAIL]
@@ -1653,7 +1664,7 @@ def main(argv: list[str] | None = None) -> int:
             print("failures:")
             for r in failed:
                 print(f"\n  [{r.group}] {r.case}")
-                for line in str(r.detail).splitlines()[:12]:
+                for line in _safe(str(r.detail)).splitlines()[:12]:
                     print(f"      {line}")
         print("=" * 70)
         return 1 if failed else 0

@@ -62,7 +62,9 @@ SPEC = Spec(
     str_slice_end="{x}[..{end}].to_string()",
     list_concat="{{ let mut t = {l}; t.extend({r}.iter()); t }}",
     condition_parens=False,
-    foreach_template="for {var} in {iter}.iter()",
+    # .cloned() so the loop variable is owned: iterating a &[i64]
+    # otherwise yields &i64 and `x == 5` does not compile.
+    foreach_template="for {var} in {iter}.iter().cloned()",
     try_template="// try/except not natively supported in Rust\n// {body}\n// {handler}",
     struct_template="#[derive(Clone)]\nstruct {name} {{\n{fields}\n}}",
     struct_field_template="    {type}: {name},",
