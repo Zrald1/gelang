@@ -31,6 +31,10 @@ SPEC = Spec(
     range_step_call="({lo}..{hi}).Step({step})",
     len_call="{x}.Length",
     list_len="{x}.Count",
+    # Dictionary and HashSet expose Count, not Length; len()
+    # fell back to len_call and emitted an invalid member.
+    dict_len="{x}.Count",
+    set_len="{x}.Count",
     print_int='Console.WriteLine({v})',
     print_float='Console.WriteLine({v})',
     print_str='Console.WriteLine({v})',
